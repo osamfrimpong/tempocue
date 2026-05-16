@@ -39,7 +39,7 @@ pub async fn set_timer_duration(duration_ms: i64, state: State<'_, AppState>) ->
 
 #[tauri::command(rename_all = "camelCase")]
 pub async fn set_timer_remaining(remaining_ms: i64, state: State<'_, AppState>) -> Result<(), String> {
-    state.update_timer(|timer| timer.set_remaining(remaining_ms)).await;
+    state.set_remaining(remaining_ms).await;
     Ok(())
 }
 
@@ -150,6 +150,12 @@ pub async fn set_blackout(enabled: bool, state: State<'_, AppState>) -> Result<(
 #[tauri::command]
 pub async fn set_hide_timer(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
     state.set_hide_timer(enabled).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_live(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    state.set_live(enabled).await;
     Ok(())
 }
 

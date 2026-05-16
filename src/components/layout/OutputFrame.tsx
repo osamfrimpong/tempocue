@@ -28,6 +28,21 @@ export function OutputFrame({ mode }: OutputFrameProps) {
     void initialize();
   }, [initialize]);
 
+  if (!output.live) {
+    if (mode === "obs" || mode === "lower-third") {
+      return <main className="min-h-screen bg-transparent" />;
+    }
+
+    return (
+      <main className="grid min-h-screen place-items-center bg-[#07090f] p-8 text-center text-white">
+        <section>
+          <h1 className="text-3xl font-semibold">Output inactive</h1>
+          <p className="mt-3 text-white/65">Use the TempoCue controller to go live.</p>
+        </section>
+      </main>
+    );
+  }
+
   if (output.blackout) {
     return <main className={cn("min-h-screen", mode === "obs" ? "bg-transparent" : "bg-black")} />;
   }

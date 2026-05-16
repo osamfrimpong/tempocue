@@ -59,6 +59,7 @@ export type OutputMessageTextStyle = {
 };
 
 export type OutputState = {
+  live: boolean;
   blackout: boolean;
   hideTimer: boolean;
   message: OutputMessage | null;
@@ -95,4 +96,5 @@ export type RealtimeEvent =
   | { type: "message/show"; payload: OutputMessage }
   | { type: "message/hide"; payload: { id: string } }
   | { type: "output/blackout"; payload: { enabled: boolean } }
-  | { type: "output/hide-timer"; payload: { enabled: boolean } };
+  | { type: "output/hide-timer"; payload: { enabled: boolean } }
+  | { type: "output/live"; payload: { enabled: boolean } };

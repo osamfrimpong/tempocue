@@ -66,6 +66,7 @@ export function Controller() {
   const deleteRundownItem = useTempoCueStore((state) => state.deleteRundownItem);
   const setBlackout = useTempoCueStore((state) => state.setBlackout);
   const setHideTimer = useTempoCueStore((state) => state.setHideTimer);
+  const setLive = useTempoCueStore((state) => state.setLive);
   const showMessage = useTempoCueStore((state) => state.showMessage);
   const hideMessage = useTempoCueStore((state) => state.hideMessage);
   const now = useTicker(100) + clockOffsetMs;
@@ -82,7 +83,6 @@ export function Controller() {
   const [newNotes, setNewNotes] = useState("");
   const [itemDialogMode, setItemDialogMode] = useState<ItemDialogMode | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
-  const [isLive, setIsLive] = useState(false);
   const [localUrlsExpanded, setLocalUrlsExpanded] = useState(false);
   const previousNetworkHost = useRef<string | null>(null);
   const [networkChanged, setNetworkChanged] = useState(false);
@@ -111,6 +111,7 @@ export function Controller() {
   const active = rundown[activeIndex] ?? rundown[0];
   const next = rundown[activeIndex + 1];
   const rundownItemActionsDisabled = timer.status === "running";
+  const isLive = output.live;
   const outputStatusLabel = !isLive ? "Output inactive" : output.blackout ? "Blackout" : "Output active";
   const controllerTimerLabel = active?.timingMode === "end-time" ? "End at" : "Duration";
   const controllerTimerValue =
@@ -235,12 +236,12 @@ export function Controller() {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-3">
-          <Button disabled={isLive} onClick={() => setIsLive(true)}>
+          <Button disabled={isLive} onClick={() => void setLive(true)}>
             <Radio className="h-4 w-4" />
             Go Live
           </Button>
           {isLive && (
-            <Button variant="destructive" onClick={() => setIsLive(false)}>
+            <Button variant="destructive" onClick={() => void setLive(false)}>
               <Square className="h-4 w-4" />
               End Live
             </Button>

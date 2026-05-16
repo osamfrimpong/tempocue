@@ -87,11 +87,17 @@ fn local_network_ipv4() -> Option<Ipv4Addr> {
     Some(ip)
 }
 
-async fn index_handler() -> Response {
+async fn index_handler(State(context): State<ServerContext>) -> Response {
+    if !context.state.is_live().await {
+        return inactive_response();
+    }
     serve_index()
 }
 
-async fn asset_or_index_handler(Path(path): Path<String>) -> Response {
+async fn asset_or_index_handler(Path(path): Path<String>, State(context): State<ServerContext>) -> Response {
+    if !context.state.is_live().await {
+        return inactive_response();
+    }
     if path.starts_with("assets/") {
         return serve_asset(&path);
     }
@@ -102,6 +108,10 @@ async fn supporting_file_handler(
     Path((item_id, file_index, _filename)): Path<(String, usize, String)>,
     State(context): State<ServerContext>,
 ) -> Response {
+    if !context.state.is_live().await {
+        return inactive_response();
+    }
+
     let Some(file_path) = context.state.supporting_file(&item_id, file_index).await else {
         return StatusCode::NOT_FOUND.into_response();
     };
@@ -164,6 +174,54 @@ fn serve_index() -> Response {
     }
 
     Html(dev_index_html()).into_response()
+}
+
+fn inactive_response() -> Response {
+    let mut response = Html(
+        r#"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TempoCue inactive</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #07090f;
+        color: #f7f8fb;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      main {
+        max-width: 32rem;
+        padding: 2rem;
+        text-align: center;
+      }
+      h1 {
+        margin: 0 0 0.75rem;
+        font-size: 1.75rem;
+      }
+      p {
+        margin: 0;
+        color: #aeb6c5;
+        line-height: 1.5;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Output inactive</h1>
+      <p>Use the TempoCue controller to go live before opening local output URLs.</p>
+    </main>
+  </body>
+</html>"#,
+    )
+    .into_response();
+    *response.status_mut() = StatusCode::SERVICE_UNAVAILABLE;
+    response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 async fn ws_handler(ws: WebSocketUpgrade, State(context): State<ServerContext>) -> impl IntoResponse {

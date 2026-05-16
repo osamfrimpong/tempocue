@@ -54,6 +54,7 @@ impl Default for RundownTimingMode {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OutputState {
+    pub live: bool,
     pub blackout: bool,
     pub hide_timer: bool,
     pub message: Option<OutputMessage>,
@@ -137,6 +138,8 @@ pub enum RealtimeEvent {
     Blackout { enabled: bool },
     #[serde(rename = "output/hide-timer")]
     HideTimer { enabled: bool },
+    #[serde(rename = "output/live")]
+    Live { enabled: bool },
 }
 
 struct InnerState {
@@ -168,6 +171,7 @@ impl Default for AppState {
                 timers_by_item,
                 rundown,
                 output: OutputState {
+                    live: false,
                     blackout: false,
                     hide_timer: false,
                     message: None,
@@ -233,6 +237,40 @@ impl AppState {
         let (timer, items) = {
             let mut state = self.inner.write().await;
             state.timer.add_time(delta_ms);
+            let active_item_id = state.output.active_item_id.clone();
+            let timer = state.timer.clone();
+            state.timers_by_item.insert(active_item_id.clone(), timer.clone());
+
+            let items = if let Some(end_time) = end_time_for_timer(&timer) {
+                if let Some(item) = state.rundown.iter_mut().find(|item| item.id == active_item_id) {
+                    if item.timing_mode == RundownTimingMode::EndTime {
+                        item.duration_ms = timer.duration_ms;
+                        item.end_time = Some(end_time);
+                        Some(state.rundown.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            (timer, items)
+        };
+
+        self.broadcast(RealtimeEvent::TimerState(timer.clone()));
+        if let Some(items) = items {
+            self.broadcast(RealtimeEvent::RundownItems(items));
+        }
+        timer
+    }
+
+    pub async fn set_remaining(&self, remaining_ms: i64) -> TimerState {
+        let (timer, items) = {
+            let mut state = self.inner.write().await;
+            state.timer.set_remaining(remaining_ms);
             let active_item_id = state.output.active_item_id.clone();
             let timer = state.timer.clone();
             state.timers_by_item.insert(active_item_id.clone(), timer.clone());
@@ -467,6 +505,19 @@ impl AppState {
             state.output.hide_timer = enabled;
         }
         self.broadcast(RealtimeEvent::HideTimer { enabled });
+    }
+
+    pub async fn set_live(&self, enabled: bool) {
+        {
+            let mut state = self.inner.write().await;
+            state.output.live = enabled;
+        }
+        self.broadcast(RealtimeEvent::Live { enabled });
+    }
+
+    pub async fn is_live(&self) -> bool {
+        let state = self.inner.read().await;
+        state.output.live
     }
 
     pub async fn show_message(&self, message: OutputMessage) {

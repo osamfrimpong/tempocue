@@ -79,6 +79,7 @@ const fallbackRundown: RundownItem[] = [
 ];
 
 const fallbackOutput: OutputState = {
+  live: false,
   blackout: false,
   hideTimer: false,
   message: null,
@@ -107,6 +108,7 @@ type StoreState = Snapshot & {
   skipTimer: () => Promise<void>;
   setBlackout: (enabled: boolean) => Promise<void>;
   setHideTimer: (enabled: boolean) => Promise<void>;
+  setLive: (enabled: boolean) => Promise<void>;
   setTimerColorSettings: (settings: TimerColorSettings) => void;
   showMessage: (message: OutputMessage) => Promise<void>;
   hideMessage: () => Promise<void>;
@@ -368,7 +370,34 @@ export const useTempoCueStore = create<StoreState>((set, get) => ({
   },
 
   setRemaining: async (remainingMs: number) => {
-    mutateLocalTimer(set, (timer) => setTimerRemaining(timer, remainingMs, Date.now() + get().clockOffsetMs));
+    set((state) => {
+      const now = Date.now() + state.clockOffsetMs;
+      const timer = setTimerRemaining(state.timer, remainingMs, now);
+      const activeItem = state.rundown.find((item) => item.id === state.output.activeItemId);
+      const shouldUpdateEndTime =
+        activeItem?.timingMode === "end-time" &&
+        timer.mode === "end-at-time" &&
+        timer.targetEndAtMs !== null;
+
+      return {
+        timer,
+        rundown: shouldUpdateEndTime
+          ? state.rundown.map((item) =>
+              item.id === state.output.activeItemId
+                ? {
+                    ...item,
+                    durationMs: timer.durationMs,
+                    endTime: formatTimeInput(timer.targetEndAtMs ?? now),
+                  }
+                : item,
+            )
+          : state.rundown,
+        timersByItem: {
+          ...state.timersByItem,
+          [state.output.activeItemId]: timer,
+        },
+      };
+    });
     if (canInvoke) return invoke("set_timer_remaining", { remainingMs });
   },
 
@@ -425,6 +454,11 @@ export const useTempoCueStore = create<StoreState>((set, get) => ({
     set((state) => ({ output: { ...state.output, hideTimer: enabled } }));
   },
 
+  setLive: async (enabled: boolean) => {
+    if (canInvoke) return invoke("set_live", { enabled });
+    set((state) => ({ output: { ...state.output, live: enabled } }));
+  },
+
   setTimerColorSettings: (settings) => {
     const timerColorSettings = normalizeTimerColorSettings(settings);
     window.localStorage.setItem(timerColorSettingsKey, JSON.stringify(timerColorSettings));
@@ -476,6 +510,7 @@ function applyRealtimeEvent(event: RealtimeEvent, set: (state: Partial<StoreStat
   if (event.type === "message/hide") set((state) => ({ output: { ...state.output, message: null } }));
   if (event.type === "output/blackout") set((state) => ({ output: { ...state.output, blackout: event.payload.enabled } }));
   if (event.type === "output/hide-timer") set((state) => ({ output: { ...state.output, hideTimer: event.payload.enabled } }));
+  if (event.type === "output/live") set((state) => ({ output: { ...state.output, live: event.payload.enabled } }));
 }
 
 function connectWebSocket(port: number, set: (state: Partial<StoreState> | ((state: StoreState) => Partial<StoreState>)) => void) {
