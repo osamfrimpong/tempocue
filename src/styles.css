@@ -1,0 +1,80 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  --background: 210 18% 6%;
+  --foreground: 200 25% 94%;
+  --card: 210 16% 9%;
+  --card-foreground: 200 25% 94%;
+  --primary: 151 70% 55%;
+  --primary-foreground: 160 40% 8%;
+  --secondary: 215 14% 17%;
+  --secondary-foreground: 200 25% 94%;
+  --muted: 215 14% 16%;
+  --muted-foreground: 210 10% 64%;
+  --accent: 207 62% 22%;
+  --accent-foreground: 200 25% 94%;
+  --destructive: 0 72% 47%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 214 16% 20%;
+  --input: 214 16% 22%;
+  --ring: 151 70% 55%;
+  --radius: 0.5rem;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+body:has([class*="bg-transparent"]) {
+  background: transparent;
+}
+
+.message-flash {
+  animation: message-flash 1.4s steps(2, jump-none) infinite;
+}
+
+@keyframes message-flash {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0;
+  }
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 999px;
+}

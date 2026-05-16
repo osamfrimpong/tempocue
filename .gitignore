@@ -1,7 +1,52 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
 build/
+out/
+.vite/
+.turbo/
+.cache/
+coverage/
+
+# Rust / Tauri build output
+target/
+src-tauri/target/
+src-tauri/gen/schemas/
+**/*.rs.bk
+
+# Environment and local config
 .env
-.DS_Store
+.env.*
+!.env.example
+!.env.sample
+
+# Logs and diagnostics
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.pid
+*.seed
+*.pid.lock
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor / IDE files
 .idea/
+.vscode/
+*.swp
+*.swo
+
+# Package manager caches
+.npm/
+.pnpm-store/
+.yarn/*
+!.yarn/releases/
+!.yarn/plugins/
+!.yarn/sdks/
+!.yarn/versions/

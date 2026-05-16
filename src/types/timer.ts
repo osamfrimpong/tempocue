@@ -1,0 +1,89 @@
+export type TimerStatus = "idle" | "running" | "paused" | "finished";
+export type TimerMode = "countdown" | "countup" | "clock" | "end-at-time";
+
+export type OvertimeBehavior = "continue" | "stop" | "hide" | "auto-next";
+
+export type TimerColorSettings = {
+  yellowThresholdMs: number;
+  redThresholdMs: number;
+};
+
+export type TimerState = {
+  id: string;
+  mode: TimerMode;
+  status: TimerStatus;
+  durationMs: number;
+  startedAtMs: number | null;
+  pausedAtMs: number | null;
+  accumulatedPauseMs: number;
+  remainingAtPauseMs: number | null;
+  targetEndAtMs: number | null;
+  serverNowMs: number;
+  overtimeBehavior: OvertimeBehavior;
+};
+
+export type RundownItem = {
+  id: string;
+  title: string;
+  speaker: string;
+  notes: string;
+  supportingFiles: string[];
+  durationMs: number;
+  color: string;
+  completed: boolean;
+};
+
+export type OutputMessage = {
+  id: string;
+  type: "fullscreen" | "lower-third" | "emergency" | "announcement";
+  title: string;
+  body: string;
+  formatting?: OutputMessageFormatting | null;
+  flashing?: boolean;
+  visible: boolean;
+  target: "viewer" | "obs" | "all";
+};
+
+export type OutputMessageFormatting = {
+  title: OutputMessageTextStyle;
+  body: OutputMessageTextStyle;
+};
+
+export type OutputMessageTextStyle = {
+  bold: boolean;
+  italic: boolean;
+  color: string;
+};
+
+export type OutputState = {
+  blackout: boolean;
+  hideTimer: boolean;
+  message: OutputMessage | null;
+  activeItemId: string;
+};
+
+export type ServerUrls = {
+  port: number;
+  control: string;
+  viewer: string;
+  obs: string;
+  lowerThird: string;
+  agenda: string;
+};
+
+export type Snapshot = {
+  timer: TimerState;
+  rundown: RundownItem[];
+  output: OutputState;
+  urls: ServerUrls;
+};
+
+export type RealtimeEvent =
+  | { type: "snapshot"; payload: Snapshot }
+  | { type: "timer/state"; payload: TimerState }
+  | { type: "rundown/items"; payload: RundownItem[] }
+  | { type: "rundown/active-item"; payload: { itemId: string } }
+  | { type: "message/show"; payload: OutputMessage }
+  | { type: "message/hide"; payload: { id: string } }
+  | { type: "output/blackout"; payload: { enabled: boolean } }
+  | { type: "output/hide-timer"; payload: { enabled: boolean } };
