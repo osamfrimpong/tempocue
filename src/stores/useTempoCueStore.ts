@@ -457,7 +457,14 @@ function applyRealtimeEvent(event: RealtimeEvent, set: (state: Partial<StoreStat
   }
 
   if (event.type === "timer/state") {
-    set({ timer: event.payload, clockOffsetMs: event.payload.serverNowMs - Date.now() });
+    set((state) => ({
+      timer: event.payload,
+      clockOffsetMs: event.payload.serverNowMs - Date.now(),
+      timersByItem: {
+        ...state.timersByItem,
+        [state.output.activeItemId]: event.payload,
+      },
+    }));
     return;
   }
 

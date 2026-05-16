@@ -12,41 +12,48 @@ type TimerDisplayProps = {
   onRemainingChange?: (remainingMs: number) => void;
 };
 
+type DraftProgress = {
+  elapsedMs: number;
+  nowMs: number;
+};
+
 export function TimerDisplay({ timer, nowMs, className, compact = false, onRemainingChange }: TimerDisplayProps) {
   const timerColorSettings = useTempoCueStore((state) => state.timerColorSettings);
   const remainingMs = getRemainingMs(timer, nowMs);
   const showsProgress = timer.mode === "countdown" || timer.mode === "end-at-time";
   const canDragProgress = showsProgress && Boolean(onRemainingChange) && timer.durationMs > 0;
   const liveElapsedMs = Math.min(timer.durationMs, Math.max(0, timer.durationMs - remainingMs));
-  const [draftElapsedMs, setDraftElapsedMs] = useState<number | null>(null);
+  const [draftProgress, setDraftProgress] = useState<DraftProgress | null>(null);
   const isScrubbingRef = useRef(false);
-  const latestDraftElapsedMsRef = useRef<number | null>(null);
-  const displayedElapsedMs = draftElapsedMs ?? liveElapsedMs;
-  const displayedRemainingMs = draftElapsedMs === null ? remainingMs : timer.durationMs - draftElapsedMs;
+  const latestDraftProgressRef = useRef<DraftProgress | null>(null);
+  const displayedElapsedMs = draftProgress ? getDraftElapsedMs(draftProgress, timer, nowMs) : liveElapsedMs;
+  const displayedRemainingMs = draftProgress === null ? remainingMs : timer.durationMs - displayedElapsedMs;
   const timerColor = getTimerColor(displayedRemainingMs, timer.mode, timerColorSettings);
   const progress = getTimerProgress(timer.durationMs, displayedRemainingMs);
   const colorStops = getTimerProgressColorStops(timer.durationMs, timerColorSettings);
 
   useEffect(() => {
     if (!isScrubbingRef.current) {
-      latestDraftElapsedMsRef.current = null;
-      setDraftElapsedMs(null);
+      latestDraftProgressRef.current = null;
+      setDraftProgress(null);
     }
   }, [liveElapsedMs, timer.durationMs]);
 
   const commitProgress = (elapsedMs?: number) => {
-    const nextElapsedMs = elapsedMs ?? latestDraftElapsedMsRef.current;
-    if (nextElapsedMs === null || nextElapsedMs === undefined) return;
+    const nextDraftProgress = elapsedMs === undefined ? latestDraftProgressRef.current : { elapsedMs, nowMs };
+    if (nextDraftProgress === null) return;
     isScrubbingRef.current = false;
-    latestDraftElapsedMsRef.current = null;
-    setDraftElapsedMs(null);
-    onRemainingChange?.(timer.durationMs - nextElapsedMs);
+    latestDraftProgressRef.current = null;
+    setDraftProgress(null);
+    onRemainingChange?.(timer.durationMs - getDraftElapsedMs(nextDraftProgress, timer, nowMs));
   };
 
-  const updateDraftProgress = (elapsedMs: number) => {
+  const updateDraftProgress = (elapsedMs: number, syncOutput = false) => {
+    const nextDraftProgress = { elapsedMs, nowMs };
     isScrubbingRef.current = true;
-    latestDraftElapsedMsRef.current = elapsedMs;
-    setDraftElapsedMs(elapsedMs);
+    latestDraftProgressRef.current = nextDraftProgress;
+    setDraftProgress(nextDraftProgress);
+    if (syncOutput) onRemainingChange?.(timer.durationMs - elapsedMs);
   };
 
   useEffect(() => {
@@ -118,11 +125,12 @@ export function TimerDisplay({ timer, nowMs, className, compact = false, onRemai
                 if (isScrubbingRef.current) commitProgress(Number(event.currentTarget.value));
               }}
               onChange={(event) => {
-                updateDraftProgress(Number(event.currentTarget.value));
+                updateDraftProgress(Number(event.currentTarget.value), true);
               }}
               onInvalid={() => {
                 isScrubbingRef.current = false;
-                setDraftElapsedMs(null);
+                latestDraftProgressRef.current = null;
+                setDraftProgress(null);
               }}
             />
           )}
@@ -130,6 +138,11 @@ export function TimerDisplay({ timer, nowMs, className, compact = false, onRemai
       )}
     </div>
   );
+}
+
+function getDraftElapsedMs(draftProgress: DraftProgress, timer: TimerState, nowMs: number) {
+  const runningDeltaMs = timer.status === "running" ? nowMs - draftProgress.nowMs : 0;
+  return Math.min(timer.durationMs, Math.max(0, draftProgress.elapsedMs + runningDeltaMs));
 }
 
 function getTimerProgress(durationMs: number, remainingMs: number) {
