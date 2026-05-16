@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { PointerEvent } from "react";
 import { cn } from "../../lib/utils";
 import { formatTimer, getRemainingMs, getTimerColor, TIMER_COLORS } from "../../lib/timer";
 import { useTempoCueStore } from "../../stores/useTempoCueStore";
@@ -14,7 +15,6 @@ type TimerDisplayProps = {
 
 type DraftProgress = {
   elapsedMs: number;
-  nowMs: number;
 };
 
 export function TimerDisplay({ timer, nowMs, className, compact = false, onRemainingChange }: TimerDisplayProps) {
@@ -26,7 +26,7 @@ export function TimerDisplay({ timer, nowMs, className, compact = false, onRemai
   const [draftProgress, setDraftProgress] = useState<DraftProgress | null>(null);
   const isScrubbingRef = useRef(false);
   const latestDraftProgressRef = useRef<DraftProgress | null>(null);
-  const displayedElapsedMs = draftProgress ? getDraftElapsedMs(draftProgress, timer, nowMs) : liveElapsedMs;
+  const displayedElapsedMs = draftProgress ? draftProgress.elapsedMs : liveElapsedMs;
   const displayedRemainingMs = draftProgress === null ? remainingMs : timer.durationMs - displayedElapsedMs;
   const timerColor = getTimerColor(displayedRemainingMs, timer.mode, timerColorSettings);
   const progress = getTimerProgress(timer.durationMs, displayedRemainingMs);
@@ -40,36 +40,33 @@ export function TimerDisplay({ timer, nowMs, className, compact = false, onRemai
   }, [liveElapsedMs, timer.durationMs]);
 
   const commitProgress = (elapsedMs?: number) => {
-    const nextDraftProgress = elapsedMs === undefined ? latestDraftProgressRef.current : { elapsedMs, nowMs };
+    const nextDraftProgress = elapsedMs === undefined ? latestDraftProgressRef.current : { elapsedMs };
     if (nextDraftProgress === null) return;
     isScrubbingRef.current = false;
     latestDraftProgressRef.current = null;
     setDraftProgress(null);
-    onRemainingChange?.(timer.durationMs - getDraftElapsedMs(nextDraftProgress, timer, nowMs));
+    onRemainingChange?.(timer.durationMs - nextDraftProgress.elapsedMs);
   };
 
-  const updateDraftProgress = (elapsedMs: number, syncOutput = false) => {
-    const nextDraftProgress = { elapsedMs, nowMs };
+  const updateDraftProgress = (elapsedMs: number) => {
+    const nextDraftProgress = { elapsedMs };
     isScrubbingRef.current = true;
     latestDraftProgressRef.current = nextDraftProgress;
     setDraftProgress(nextDraftProgress);
-    if (syncOutput) onRemainingChange?.(timer.durationMs - elapsedMs);
   };
 
-  useEffect(() => {
-    if (!canDragProgress || !isScrubbingRef.current) return;
+  const getElapsedMsFromPointer = (event: PointerEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratio = rect.width === 0 ? 0 : (event.clientX - rect.left) / rect.width;
+    const elapsedMs = Math.min(timer.durationMs, Math.max(0, ratio * timer.durationMs));
+    return Math.round(elapsedMs / 1000) * 1000;
+  };
 
-    const handlePointerRelease = () => {
-      commitProgress();
-    };
-
-    window.addEventListener("pointerup", handlePointerRelease);
-    window.addEventListener("pointercancel", handlePointerRelease);
-    return () => {
-      window.removeEventListener("pointerup", handlePointerRelease);
-      window.removeEventListener("pointercancel", handlePointerRelease);
-    };
-  }, [canDragProgress, timer.durationMs]);
+  const nudgeProgress = (deltaMs: number) => {
+    const nextElapsedMs = Math.min(timer.durationMs, Math.max(0, displayedElapsedMs + deltaMs));
+    updateDraftProgress(nextElapsedMs);
+    commitProgress(nextElapsedMs);
+  };
 
   return (
     <div className={cn("grid min-w-0 justify-items-center [container-type:inline-size]", compact ? "gap-3" : "w-full gap-6", className)}>
@@ -91,7 +88,7 @@ export function TimerDisplay({ timer, nowMs, className, compact = false, onRemai
             compact ? "h-4 w-72" : "h-8 w-full max-w-[72rem]",
             canDragProgress && "cursor-ew-resize",
           )}
-          role="progressbar"
+          role={canDragProgress ? undefined : "progressbar"}
           aria-label="Timer progress"
           aria-valuemin={0}
           aria-valuemax={timer.durationMs}
@@ -107,30 +104,59 @@ export function TimerDisplay({ timer, nowMs, className, compact = false, onRemai
             style={{ left: `${progress}%` }}
           />
           {canDragProgress && (
-            <input
-              className="absolute inset-0 h-full w-full cursor-ew-resize opacity-0"
-              type="range"
-              min={0}
-              max={timer.durationMs}
-              step={1000}
-              value={displayedElapsedMs}
+            <div
+              className="absolute inset-0 cursor-ew-resize touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+              role="slider"
+              tabIndex={0}
               aria-label="Adjust remaining time"
+              aria-valuemin={0}
+              aria-valuemax={timer.durationMs}
+              aria-valuenow={displayedElapsedMs}
               onPointerDown={(event) => {
-                updateDraftProgress(Number(event.currentTarget.value));
+                event.preventDefault();
+                event.currentTarget.setPointerCapture(event.pointerId);
+                updateDraftProgress(getElapsedMsFromPointer(event));
               }}
-              onBlur={(event) => {
-                if (isScrubbingRef.current) commitProgress(Number(event.currentTarget.value));
+              onPointerMove={(event) => {
+                if (!isScrubbingRef.current || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
+                updateDraftProgress(getElapsedMsFromPointer(event));
               }}
-              onKeyUp={(event) => {
-                if (isScrubbingRef.current) commitProgress(Number(event.currentTarget.value));
+              onPointerUp={(event) => {
+                if (!isScrubbingRef.current) return;
+                const elapsedMs = getElapsedMsFromPointer(event);
+                commitProgress(elapsedMs);
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
               }}
-              onChange={(event) => {
-                updateDraftProgress(Number(event.currentTarget.value), true);
+              onPointerCancel={(event) => {
+                if (!isScrubbingRef.current) return;
+                commitProgress();
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
               }}
-              onInvalid={() => {
-                isScrubbingRef.current = false;
-                latestDraftProgressRef.current = null;
-                setDraftProgress(null);
+              onLostPointerCapture={() => {
+                if (isScrubbingRef.current) commitProgress();
+              }}
+              onBlur={() => {
+                if (isScrubbingRef.current) commitProgress();
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
+                  event.preventDefault();
+                  nudgeProgress(-1000);
+                }
+                if (event.key === "ArrowRight" || event.key === "ArrowUp") {
+                  event.preventDefault();
+                  nudgeProgress(1000);
+                }
+                if (event.key === "Home") {
+                  event.preventDefault();
+                  updateDraftProgress(0);
+                  commitProgress(0);
+                }
+                if (event.key === "End") {
+                  event.preventDefault();
+                  updateDraftProgress(timer.durationMs);
+                  commitProgress(timer.durationMs);
+                }
               }}
             />
           )}
@@ -138,11 +164,6 @@ export function TimerDisplay({ timer, nowMs, className, compact = false, onRemai
       )}
     </div>
   );
-}
-
-function getDraftElapsedMs(draftProgress: DraftProgress, timer: TimerState, nowMs: number) {
-  const runningDeltaMs = timer.status === "running" ? nowMs - draftProgress.nowMs : 0;
-  return Math.min(timer.durationMs, Math.max(0, draftProgress.elapsedMs + runningDeltaMs));
 }
 
 function getTimerProgress(durationMs: number, remainingMs: number) {
