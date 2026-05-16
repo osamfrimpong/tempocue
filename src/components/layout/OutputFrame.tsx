@@ -18,9 +18,10 @@ export function OutputFrame({ mode }: OutputFrameProps) {
   const now = useTicker(100) + clockOffsetMs;
   const activeIndex = rundown.findIndex((item) => item.id === output.activeItemId);
   const active = rundown[activeIndex] ?? rundown[0];
+  const isPresenterOutput = mode === "viewer" || mode === "obs";
   const targetedMessage =
     output.message &&
-    (output.message.target === mode || output.message.target === "all" || mode === "viewer" || mode === "lower-third")
+    (output.message.target === mode || output.message.target === "all" || isPresenterOutput || mode === "lower-third")
       ? output.message
       : null;
 
@@ -99,11 +100,16 @@ export function OutputFrame({ mode }: OutputFrameProps) {
     );
   }
 
-  const transparent = mode === "obs";
+  if (isPresenterOutput) {
+    const transparent = mode === "obs";
 
-  if (mode === "viewer") {
     return (
-      <main className="relative grid min-h-screen place-items-center overflow-hidden bg-[#080b0f] p-10 text-white">
+      <main
+        className={cn(
+          "relative grid min-h-screen place-items-center overflow-hidden p-10 text-white",
+          transparent ? "bg-transparent" : "bg-[#080b0f]",
+        )}
+      >
         <header className="absolute left-10 top-8 max-w-[70vw]">
           <div className="truncate text-[clamp(1.75rem,3vw,3.75rem)] font-semibold">{active?.title}</div>
           <div className="mt-2 text-[clamp(1rem,1.5vw,1.75rem)] font-medium uppercase text-white/55">
@@ -125,27 +131,5 @@ export function OutputFrame({ mode }: OutputFrameProps) {
     );
   }
 
-  return (
-    <main
-      className={cn(
-        "grid min-h-screen place-items-center overflow-hidden p-10 text-white",
-        transparent ? "bg-transparent" : "bg-[#080b0f]",
-      )}
-    >
-      <section className={cn("w-full text-center", transparent && "drop-shadow-[0_4px_22px_rgba(0,0,0,0.8)]")}>
-        <div className="grid justify-items-center gap-8">
-          {targetedMessage && (
-            <FormattedMessage
-              message={targetedMessage}
-              className={targetedMessage.flashing ? "message-flash" : undefined}
-              titleClassName="text-[clamp(2rem,5vw,5rem)] font-semibold"
-              bodyClassName="text-[clamp(3rem,8vw,8rem)] font-bold"
-            />
-          )}
-          {!output.hideTimer && <TimerDisplay timer={timer} nowMs={now} />}
-          {!targetedMessage && <div className="text-[clamp(2rem,5vw,5rem)] font-semibold">{active?.title}</div>}
-        </div>
-      </section>
-    </main>
-  );
+  return null;
 }

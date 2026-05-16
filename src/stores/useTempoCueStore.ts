@@ -52,30 +52,6 @@ const fallbackRundown: RundownItem[] = [
     color: "#3ddc97",
     completed: false,
   },
-  {
-    id: "welcome",
-    title: "Welcome",
-    speaker: "Host",
-    notes: "Lower-third name graphic on cue.",
-    supportingFiles: [],
-    durationMs: 5 * 60 * 1000,
-    timingMode: "duration",
-    endTime: null,
-    color: "#f5c542",
-    completed: false,
-  },
-  {
-    id: "main",
-    title: "Main Segment",
-    speaker: "Speaker",
-    notes: "Warn at five minutes remaining.",
-    supportingFiles: [],
-    durationMs: 25 * 60 * 1000,
-    timingMode: "duration",
-    endTime: null,
-    color: "#5cc8ff",
-    completed: false,
-  },
 ];
 
 const fallbackOutput: OutputState = {

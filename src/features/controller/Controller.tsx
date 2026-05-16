@@ -15,6 +15,7 @@ import {
   Italic,
   MessageSquare,
   Minus,
+  Palette,
   Paperclip,
   Pencil,
   Pause,
@@ -43,8 +44,6 @@ import type { OutputMessage, OutputMessageTextStyle, RundownItem } from "../../t
 type ItemDialogMode = "create" | "edit";
 type ItemTimingMode = "duration" | "end-time";
 type MessageStylePart = "title" | "body";
-
-const messageColourOptions = ["#ffffff", "#3ddc97", "#f5c542", "#5cc8ff", "#ff7a59", "#f25f8c"];
 
 export function Controller() {
   const initialize = useTempoCueStore((state) => state.initialize);
@@ -83,6 +82,7 @@ export function Controller() {
   const [newNotes, setNewNotes] = useState("");
   const [itemDialogMode, setItemDialogMode] = useState<ItemDialogMode | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<RundownItem | null>(null);
   const [localUrlsExpanded, setLocalUrlsExpanded] = useState(false);
   const previousNetworkHost = useRef<string | null>(null);
   const [networkChanged, setNetworkChanged] = useState(false);
@@ -217,6 +217,12 @@ export function Controller() {
     closeItemDialog();
   };
 
+  const confirmDeleteRundownItem = () => {
+    if (!deleteCandidate) return;
+    void deleteRundownItem(deleteCandidate.id);
+    setDeleteCandidate(null);
+  };
+
   const openTimePickerFromField = (event: MouseEvent<HTMLDivElement> | TouchEvent<HTMLDivElement>) => {
     if (!(event.target instanceof HTMLInputElement)) return;
     const button = event.currentTarget.querySelector<HTMLButtonElement>('[data-testid="time-button"]');
@@ -269,7 +275,7 @@ export function Controller() {
               </Button>
             </div>
           </div>
-          <div className="grid min-h-0 flex-1 gap-2 overflow-y-auto p-3">
+          <div className="grid min-h-0 flex-1 content-start gap-2 overflow-y-auto p-3">
             {rundown.map((item, index) => (
               <div
                 key={item.id}
@@ -302,7 +308,7 @@ export function Controller() {
                       size="icon"
                       aria-label={`Delete ${item.title}`}
                       disabled={rundownItemActionsDisabled || rundown.length === 1}
-                      onClick={() => void deleteRundownItem(item.id)}
+                      onClick={() => setDeleteCandidate(item)}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -571,6 +577,31 @@ export function Controller() {
           </div>
         </div>
       )}
+
+      {deleteCandidate && (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-rundown-item-title"
+        >
+          <div className="w-full max-w-sm rounded-md border border-border bg-card p-5 shadow-2xl">
+            <div className="text-sm font-semibold uppercase text-muted-foreground">Delete item</div>
+            <div id="delete-rundown-item-title" className="mt-1 text-xl font-semibold">
+              Delete {deleteCandidate.title}?
+            </div>
+            <p className="mt-3 text-sm text-muted-foreground">This removes the rundown item and its timer state.</p>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setDeleteCandidate(null)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={confirmDeleteRundownItem}>
+                Delete
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
@@ -606,28 +637,18 @@ function MessageFormatControls({
         >
           <Italic className="h-4 w-4" />
         </Button>
-        <div className="flex flex-wrap gap-1">
-          {messageColourOptions.map((colour) => (
-            <button
-              key={colour}
-              type="button"
-              className={`h-8 w-8 rounded-md border ${
-                style.color.toLowerCase() === colour ? "border-primary ring-2 ring-ring" : "border-border"
-              }`}
-              style={{ backgroundColor: colour }}
-              aria-label={`Use ${colour} for ${label.toLowerCase()}`}
-              title={colour}
-              onClick={() => onChange((current) => ({ ...current, color: colour }))}
-            />
-          ))}
-        </div>
-        <Input
-          aria-label={`${label} custom colour`}
-          type="color"
-          className="h-10 w-12 p-1"
-          value={style.color}
-          onChange={(event) => onChange((current) => ({ ...current, color: event.target.value }))}
-        />
+        <label className="inline-flex h-10 max-w-full items-center gap-2 rounded-md border border-border px-3 text-sm transition-colors hover:bg-accent">
+          <Palette className="h-4 w-4 shrink-0" />
+          <span className="shrink-0">Colour</span>
+          <Input
+            aria-label={`${label} colour`}
+            type="color"
+            className="h-7 w-8 shrink-0 rounded border-0 bg-transparent p-0"
+            value={style.color}
+            onChange={(event) => onChange((current) => ({ ...current, color: event.target.value }))}
+          />
+          <span className="min-w-0 font-mono text-xs uppercase text-muted-foreground">{style.color}</span>
+        </label>
       </div>
     </div>
   );
