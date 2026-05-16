@@ -20,6 +20,7 @@ export function TimerDisplay({ timer, nowMs, className, compact = false, onRemai
   const liveElapsedMs = Math.min(timer.durationMs, Math.max(0, timer.durationMs - remainingMs));
   const [draftElapsedMs, setDraftElapsedMs] = useState<number | null>(null);
   const isScrubbingRef = useRef(false);
+  const latestDraftElapsedMsRef = useRef<number | null>(null);
   const displayedElapsedMs = draftElapsedMs ?? liveElapsedMs;
   const displayedRemainingMs = draftElapsedMs === null ? remainingMs : timer.durationMs - draftElapsedMs;
   const timerColor = getTimerColor(displayedRemainingMs, timer.mode, timerColorSettings);
@@ -27,19 +28,41 @@ export function TimerDisplay({ timer, nowMs, className, compact = false, onRemai
   const colorStops = getTimerProgressColorStops(timer.durationMs, timerColorSettings);
 
   useEffect(() => {
-    if (!isScrubbingRef.current) setDraftElapsedMs(null);
+    if (!isScrubbingRef.current) {
+      latestDraftElapsedMsRef.current = null;
+      setDraftElapsedMs(null);
+    }
   }, [liveElapsedMs, timer.durationMs]);
 
-  const commitProgress = (elapsedMs: number) => {
+  const commitProgress = (elapsedMs?: number) => {
+    const nextElapsedMs = elapsedMs ?? latestDraftElapsedMsRef.current;
+    if (nextElapsedMs === null || nextElapsedMs === undefined) return;
     isScrubbingRef.current = false;
+    latestDraftElapsedMsRef.current = null;
     setDraftElapsedMs(null);
-    onRemainingChange?.(timer.durationMs - elapsedMs);
+    onRemainingChange?.(timer.durationMs - nextElapsedMs);
   };
 
   const updateDraftProgress = (elapsedMs: number) => {
     isScrubbingRef.current = true;
+    latestDraftElapsedMsRef.current = elapsedMs;
     setDraftElapsedMs(elapsedMs);
   };
+
+  useEffect(() => {
+    if (!canDragProgress || !isScrubbingRef.current) return;
+
+    const handlePointerRelease = () => {
+      commitProgress();
+    };
+
+    window.addEventListener("pointerup", handlePointerRelease);
+    window.addEventListener("pointercancel", handlePointerRelease);
+    return () => {
+      window.removeEventListener("pointerup", handlePointerRelease);
+      window.removeEventListener("pointercancel", handlePointerRelease);
+    };
+  }, [canDragProgress, timer.durationMs]);
 
   return (
     <div className={cn("grid min-w-0 justify-items-center [container-type:inline-size]", compact ? "gap-3" : "w-full gap-6", className)}>
@@ -85,19 +108,8 @@ export function TimerDisplay({ timer, nowMs, className, compact = false, onRemai
               step={1000}
               value={displayedElapsedMs}
               aria-label="Adjust remaining time"
-              onMouseDown={(event) => {
-                isScrubbingRef.current = true;
-                setDraftElapsedMs(Number(event.currentTarget.value));
-              }}
-              onMouseUp={(event) => {
-                commitProgress(Number(event.currentTarget.value));
-              }}
-              onTouchStart={(event) => {
-                isScrubbingRef.current = true;
-                setDraftElapsedMs(Number(event.currentTarget.value));
-              }}
-              onTouchEnd={(event) => {
-                commitProgress(Number(event.currentTarget.value));
+              onPointerDown={(event) => {
+                updateDraftProgress(Number(event.currentTarget.value));
               }}
               onBlur={(event) => {
                 if (isScrubbingRef.current) commitProgress(Number(event.currentTarget.value));

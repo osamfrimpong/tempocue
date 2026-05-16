@@ -1,6 +1,6 @@
 use tauri::State;
 
-use crate::state::{AppState, OutputMessage, RundownItem, Snapshot};
+use crate::state::{AppState, OutputMessage, RundownItem, RundownTimingMode, Snapshot};
 
 #[tauri::command]
 pub async fn get_snapshot(state: State<'_, AppState>) -> Result<Snapshot, String> {
@@ -27,7 +27,7 @@ pub async fn reset_timer(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command(rename_all = "camelCase")]
 pub async fn add_time(delta_ms: i64, state: State<'_, AppState>) -> Result<(), String> {
-    state.update_timer(|timer| timer.add_time(delta_ms)).await;
+    state.add_time(delta_ms).await;
     Ok(())
 }
 
@@ -76,6 +76,8 @@ pub async fn create_rundown_item(
     title: String,
     speaker: String,
     duration_ms: i64,
+    timing_mode: RundownTimingMode,
+    end_time: Option<String>,
     notes: String,
     supporting_files: Vec<String>,
     state: State<'_, AppState>,
@@ -86,10 +88,12 @@ pub async fn create_rundown_item(
     }
 
     Ok(state
-        .create_and_select_item(
+        .create_item(
             title,
             speaker.trim().to_string(),
             duration_ms,
+            timing_mode,
+            end_time,
             notes.trim().to_string(),
             clean_supporting_files(supporting_files),
         )
@@ -102,6 +106,8 @@ pub async fn update_rundown_item(
     title: String,
     speaker: String,
     duration_ms: i64,
+    timing_mode: RundownTimingMode,
+    end_time: Option<String>,
     notes: String,
     supporting_files: Vec<String>,
     state: State<'_, AppState>,
@@ -117,6 +123,8 @@ pub async fn update_rundown_item(
             title,
             speaker.trim().to_string(),
             duration_ms,
+            timing_mode,
+            end_time,
             notes.trim().to_string(),
             clean_supporting_files(supporting_files),
         )

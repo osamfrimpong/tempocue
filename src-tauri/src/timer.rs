@@ -194,11 +194,29 @@ impl TimerState {
         Ok(())
     }
 
+    pub fn configure_end_at_time(&mut self, target_time: &str) -> Result<(), String> {
+        let target_end_at_ms = next_local_time_ms(target_time)?;
+        let now = now_ms();
+        self.mode = TimerMode::EndAtTime;
+        self.status = TimerStatus::Idle;
+        self.duration_ms = (target_end_at_ms - now).max(0);
+        self.started_at_ms = None;
+        self.paused_at_ms = None;
+        self.accumulated_pause_ms = 0;
+        self.remaining_at_pause_ms = None;
+        self.target_end_at_ms = Some(target_end_at_ms);
+        self.server_now_ms = now;
+        Ok(())
+    }
+
     pub fn touch_server_now(&mut self) {
         self.server_now_ms = now_ms();
     }
 
     fn remaining_ms(&self, now: i64) -> i64 {
+        if self.status == TimerStatus::Idle {
+            return self.duration_ms;
+        }
         if let TimerMode::EndAtTime = self.mode {
             if self.status == TimerStatus::Paused {
                 return self.remaining_at_pause_ms.unwrap_or(self.duration_ms);
@@ -206,9 +224,6 @@ impl TimerState {
             if let Some(target_end_at_ms) = self.target_end_at_ms {
                 return target_end_at_ms - now;
             }
-        }
-        if self.status == TimerStatus::Idle {
-            return self.duration_ms;
         }
         if self.status == TimerStatus::Paused {
             return self.remaining_at_pause_ms.unwrap_or(self.duration_ms);
@@ -271,5 +286,15 @@ mod tests {
         assert_eq!(timer.status, TimerStatus::Paused);
         assert!(remaining <= timer.duration_ms - 25 * 1000);
         assert!(remaining > timer.duration_ms - 35 * 1000);
+    }
+
+    #[test]
+    fn idle_end_at_time_keeps_configured_duration_remaining() {
+        let mut timer = TimerState::new(10 * 60 * 1000);
+        timer.mode = TimerMode::EndAtTime;
+        timer.status = TimerStatus::Idle;
+        timer.target_end_at_ms = Some(now_ms() + 60 * 60 * 1000);
+
+        assert_eq!(timer.remaining_ms(now_ms() + 30 * 1000), timer.duration_ms);
     }
 }

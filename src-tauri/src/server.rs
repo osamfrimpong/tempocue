@@ -15,20 +15,16 @@ use std::{
     path::Path as FsPath,
 };
 use tokio::net::TcpListener;
+use tokio::time::{interval, Duration};
 use tower_http::cors::CorsLayer;
 
 use crate::state::{AppState, RealtimeEvent};
 
 pub async fn start_output_server(state: AppState, app: tauri::AppHandle) -> Result<(), String> {
     let network_host = local_network_ipv4().map(|ip| ip.to_string());
-    let bind_host = if network_host.is_some() {
-        Ipv4Addr::UNSPECIFIED
-    } else {
-        Ipv4Addr::LOCALHOST
-    };
-    let (listener, port) = bind_with_fallback(bind_host).await?;
-    let advertised_host = network_host.unwrap_or_else(|| "localhost".to_string());
-    state.update_urls(advertised_host, port).await;
+    let (listener, port) = bind_with_fallback(Ipv4Addr::UNSPECIFIED).await?;
+    state.update_urls(network_host.clone(), port).await;
+    tokio::spawn(watch_network_urls(state.clone(), port, network_host));
 
     let router = Router::new()
         .route("/ws", get(ws_handler))
@@ -41,6 +37,19 @@ pub async fn start_output_server(state: AppState, app: tauri::AppHandle) -> Resu
     axum::serve(listener, router)
         .await
         .map_err(|error| format!("server failed: {error}"))
+}
+
+async fn watch_network_urls(state: AppState, port: u16, mut current_host: Option<String>) {
+    let mut ticker = interval(Duration::from_secs(2));
+
+    loop {
+        ticker.tick().await;
+        let next_host = local_network_ipv4().map(|ip| ip.to_string());
+        if next_host != current_host {
+            current_host = next_host.clone();
+            state.update_urls(next_host, port).await;
+        }
+    }
 }
 
 #[derive(Clone)]

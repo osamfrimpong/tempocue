@@ -10,6 +10,9 @@ use commands::{
 };
 use server::start_output_server;
 use state::AppState;
+use tauri::menu::{MenuBuilder, SubmenuBuilder};
+
+const RESTART_APP_MENU_ID: &str = "restart_app";
 
 pub fn run() {
     let state = AppState::default();
@@ -19,6 +22,17 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(state)
         .setup(move |app| {
+            let file_menu = SubmenuBuilder::new(app, "File")
+                .text(RESTART_APP_MENU_ID, "Restart app")
+                .build()?;
+            let menu = MenuBuilder::new(app).item(&file_menu).build()?;
+            app.set_menu(menu)?;
+            app.on_menu_event(|app, event| {
+                if event.id().as_ref() == RESTART_APP_MENU_ID {
+                    app.request_restart();
+                }
+            });
+
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(error) = start_output_server(server_state, handle).await {

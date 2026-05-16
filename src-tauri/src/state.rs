@@ -30,8 +30,25 @@ pub struct RundownItem {
     #[serde(default)]
     pub supporting_files: Vec<String>,
     pub duration_ms: i64,
+    #[serde(default)]
+    pub timing_mode: RundownTimingMode,
+    #[serde(default)]
+    pub end_time: Option<String>,
     pub color: String,
     pub completed: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum RundownTimingMode {
+    Duration,
+    EndTime,
+}
+
+impl Default for RundownTimingMode {
+    fn default() -> Self {
+        Self::Duration
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -78,6 +95,19 @@ pub struct OutputMessageTextStyle {
 #[serde(rename_all = "camelCase")]
 pub struct ServerUrls {
     pub port: u16,
+    pub local: UrlSet,
+    pub network: Option<UrlSet>,
+    pub network_host: Option<String>,
+    pub control: String,
+    pub viewer: String,
+    pub obs: String,
+    pub lower_third: String,
+    pub agenda: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UrlSet {
     pub control: String,
     pub viewer: String,
     pub obs: String,
@@ -143,7 +173,7 @@ impl Default for AppState {
                     message: None,
                     active_item_id,
                 },
-                urls: urls_for_host_port("localhost".to_string(), 4310),
+                urls: urls_for_host_port(None, 4310),
             })),
             tx,
         }
@@ -167,10 +197,10 @@ impl AppState {
         }
     }
 
-    pub async fn update_urls(&self, host: String, port: u16) {
+    pub async fn update_urls(&self, network_host: Option<String>, port: u16) {
         let snapshot = {
             let mut state = self.inner.write().await;
-            state.urls = urls_for_host_port(host, port);
+            state.urls = urls_for_host_port(network_host, port);
             let mut timer = state.timer.clone();
             timer.touch_server_now();
             Snapshot {
@@ -199,6 +229,40 @@ impl AppState {
         timer
     }
 
+    pub async fn add_time(&self, delta_ms: i64) -> TimerState {
+        let (timer, items) = {
+            let mut state = self.inner.write().await;
+            state.timer.add_time(delta_ms);
+            let active_item_id = state.output.active_item_id.clone();
+            let timer = state.timer.clone();
+            state.timers_by_item.insert(active_item_id.clone(), timer.clone());
+
+            let items = if let Some(end_time) = end_time_for_timer(&timer) {
+                if let Some(item) = state.rundown.iter_mut().find(|item| item.id == active_item_id) {
+                    if item.timing_mode == RundownTimingMode::EndTime {
+                        item.duration_ms = timer.duration_ms;
+                        item.end_time = Some(end_time);
+                        Some(state.rundown.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            (timer, items)
+        };
+
+        self.broadcast(RealtimeEvent::TimerState(timer.clone()));
+        if let Some(items) = items {
+            self.broadcast(RealtimeEvent::RundownItems(items));
+        }
+        timer
+    }
+
     pub async fn select_item(&self, item_id: String) {
         let timer = {
             let mut state = self.inner.write().await;
@@ -223,7 +287,14 @@ impl AppState {
                     .timers_by_item
                     .get(&item_id)
                     .cloned()
-                    .unwrap_or_else(|| TimerState::new(duration_ms));
+                    .unwrap_or_else(|| {
+                        state
+                            .rundown
+                            .iter()
+                            .find(|item| item.id == item_id)
+                            .map(timer_for_rundown_item)
+                            .unwrap_or_else(|| TimerState::new(duration_ms))
+                    });
                 next_timer.touch_server_now();
                 state.output.active_item_id = item_id.clone();
                 state.timer = next_timer.clone();
@@ -235,19 +306,21 @@ impl AppState {
         self.broadcast(RealtimeEvent::TimerState(timer));
     }
 
-    pub async fn create_and_select_item(
+    pub async fn create_item(
         &self,
         title: String,
         speaker: String,
         duration_ms: i64,
+        timing_mode: RundownTimingMode,
+        end_time: Option<String>,
         notes: String,
         supporting_files: Vec<String>,
     ) -> RundownItem {
         let (item, items) = {
             let mut state = self.inner.write().await;
-            let previous_item_id = state.output.active_item_id.clone();
-            let previous_timer = state.timer.clone();
-            state.timers_by_item.insert(previous_item_id, previous_timer);
+            let active_item_id = state.output.active_item_id.clone();
+            let active_timer = state.timer.clone();
+            state.timers_by_item.insert(active_item_id, active_timer);
 
             let item = RundownItem {
                 id: uuid::Uuid::new_v4().to_string(),
@@ -256,18 +329,15 @@ impl AppState {
                 notes,
                 supporting_files,
                 duration_ms: duration_ms.max(0),
+                timing_mode,
+                end_time: clean_end_time(end_time),
                 color: next_item_color(state.rundown.len()),
                 completed: false,
             };
-            let timer = TimerState::new(item.duration_ms);
-            state.timers_by_item.insert(item.id.clone(), timer.clone());
-            state.output.active_item_id = item.id.clone();
-            state.timer = timer;
             state.rundown.push(item.clone());
             (item, state.rundown.clone())
         };
         self.broadcast(RealtimeEvent::RundownItems(items));
-        self.select_item(item.id.clone()).await;
         item
     }
 
@@ -277,6 +347,8 @@ impl AppState {
         title: String,
         speaker: String,
         duration_ms: i64,
+        timing_mode: RundownTimingMode,
+        end_time: Option<String>,
         notes: String,
         supporting_files: Vec<String>,
     ) -> Option<RundownItem> {
@@ -289,15 +361,18 @@ impl AppState {
             state.rundown[index].title = title;
             state.rundown[index].speaker = speaker;
             state.rundown[index].duration_ms = duration_ms.max(0);
+            state.rundown[index].timing_mode = timing_mode;
+            state.rundown[index].end_time = clean_end_time(end_time);
             state.rundown[index].notes = notes;
             state.rundown[index].supporting_files = supporting_files;
             let updated = state.rundown[index].clone();
+            let updated_timer = timer_for_rundown_item(&updated);
 
             if let Some(timer) = state.timers_by_item.get_mut(&item_id) {
-                timer.set_duration(updated.duration_ms);
+                *timer = updated_timer.clone();
             }
             if state.output.active_item_id == item_id {
-                state.timer.set_duration(updated.duration_ms);
+                state.timer = updated_timer;
                 let active_timer = state.timer.clone();
                 state.timers_by_item.insert(item_id.clone(), active_timer.clone());
                 (updated, state.rundown.clone(), Some(active_timer))
@@ -430,10 +505,57 @@ fn next_item_color(index: usize) -> String {
     COLORS[index % COLORS.len()].to_string()
 }
 
-fn urls_for_host_port(host: String, port: u16) -> ServerUrls {
-    let base = format!("http://{host}:{port}");
+fn timer_for_rundown_item(item: &RundownItem) -> TimerState {
+    let mut timer = TimerState::new(item.duration_ms);
+    if item.timing_mode == RundownTimingMode::EndTime {
+        if let Some(end_time) = &item.end_time {
+            if timer.configure_end_at_time(end_time).is_ok() {
+                return timer;
+            }
+        }
+    }
+    timer
+}
+
+fn clean_end_time(end_time: Option<String>) -> Option<String> {
+    end_time
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn end_time_for_timer(timer: &TimerState) -> Option<String> {
+    use chrono::{Local, TimeZone};
+
+    let target_end_at_ms = timer.target_end_at_ms?;
+    Local
+        .timestamp_millis_opt(target_end_at_ms)
+        .single()
+        .map(|value| value.format("%H:%M").to_string())
+}
+
+fn urls_for_host_port(network_host: Option<String>, port: u16) -> ServerUrls {
+    let local = url_set_for_host_port("localhost", port);
+    let network = network_host
+        .as_deref()
+        .map(|host| url_set_for_host_port(host, port));
+    let advertised = network.clone().unwrap_or_else(|| local.clone());
+
     ServerUrls {
         port,
+        local,
+        network,
+        network_host,
+        control: advertised.control,
+        viewer: advertised.viewer,
+        obs: advertised.obs,
+        lower_third: advertised.lower_third,
+        agenda: advertised.agenda,
+    }
+}
+
+fn url_set_for_host_port(host: &str, port: u16) -> UrlSet {
+    let base = format!("http://{host}:{port}");
+    UrlSet {
         control: format!("{base}/control"),
         viewer: format!("{base}/viewer"),
         obs: format!("{base}/obs?transparent=true"),
@@ -451,6 +573,8 @@ fn default_rundown() -> Vec<RundownItem> {
             notes: "Confirm stream is live before zero.".to_string(),
             supporting_files: vec![],
             duration_ms: DEFAULT_DURATION_MS,
+            timing_mode: RundownTimingMode::Duration,
+            end_time: None,
             color: "#3ddc97".to_string(),
             completed: false,
         },
@@ -461,6 +585,8 @@ fn default_rundown() -> Vec<RundownItem> {
             notes: "Lower-third name graphic on cue.".to_string(),
             supporting_files: vec![],
             duration_ms: 5 * 60 * 1000,
+            timing_mode: RundownTimingMode::Duration,
+            end_time: None,
             color: "#f5c542".to_string(),
             completed: false,
         },
@@ -471,6 +597,8 @@ fn default_rundown() -> Vec<RundownItem> {
             notes: "Warn at five minutes remaining.".to_string(),
             supporting_files: vec![],
             duration_ms: 25 * 60 * 1000,
+            timing_mode: RundownTimingMode::Duration,
+            end_time: None,
             color: "#5cc8ff".to_string(),
             completed: false,
         },

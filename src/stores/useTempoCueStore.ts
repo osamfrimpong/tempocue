@@ -4,17 +4,34 @@ import type {
   OutputMessage,
   OutputState,
   RealtimeEvent,
+  RundownTimingMode,
   RundownItem,
   ServerUrls,
   Snapshot,
   TimerState,
   TimerColorSettings,
 } from "../types/timer";
-import { createIdleTimer, DEFAULT_DURATION_MS, DEFAULT_TIMER_COLOR_SETTINGS, targetTimeToMs } from "../lib/timer";
+import { createIdleTimer, DEFAULT_DURATION_MS, DEFAULT_TIMER_COLOR_SETTINGS, formatTimeInput, targetTimeToMs } from "../lib/timer";
 
 const fallbackHost = window.location.hostname || "localhost";
+const fallbackLocalUrls = {
+  control: "http://localhost:4310/control",
+  viewer: "http://localhost:4310/viewer",
+  obs: "http://localhost:4310/obs?transparent=true",
+  lowerThird: "http://localhost:4310/lower-third",
+  agenda: "http://localhost:4310/agenda",
+};
 const fallbackUrls: ServerUrls = {
   port: 4310,
+  local: fallbackLocalUrls,
+  network: fallbackHost === "localhost" || fallbackHost === "127.0.0.1" ? null : {
+    control: `http://${fallbackHost}:4310/control`,
+    viewer: `http://${fallbackHost}:4310/viewer`,
+    obs: `http://${fallbackHost}:4310/obs?transparent=true`,
+    lowerThird: `http://${fallbackHost}:4310/lower-third`,
+    agenda: `http://${fallbackHost}:4310/agenda`,
+  },
+  networkHost: fallbackHost === "localhost" || fallbackHost === "127.0.0.1" ? null : fallbackHost,
   control: `http://${fallbackHost}:4310/control`,
   viewer: `http://${fallbackHost}:4310/viewer`,
   obs: `http://${fallbackHost}:4310/obs?transparent=true`,
@@ -30,6 +47,8 @@ const fallbackRundown: RundownItem[] = [
     notes: "Confirm stream is live before zero.",
     supportingFiles: [],
     durationMs: DEFAULT_DURATION_MS,
+    timingMode: "duration",
+    endTime: null,
     color: "#3ddc97",
     completed: false,
   },
@@ -40,6 +59,8 @@ const fallbackRundown: RundownItem[] = [
     notes: "Lower-third name graphic on cue.",
     supportingFiles: [],
     durationMs: 5 * 60 * 1000,
+    timingMode: "duration",
+    endTime: null,
     color: "#f5c542",
     completed: false,
   },
@@ -50,6 +71,8 @@ const fallbackRundown: RundownItem[] = [
     notes: "Warn at five minutes remaining.",
     supportingFiles: [],
     durationMs: 25 * 60 * 1000,
+    timingMode: "duration",
+    endTime: null,
     color: "#5cc8ff",
     completed: false,
   },
@@ -70,8 +93,8 @@ type StoreState = Snapshot & {
   timersByItem: Record<string, TimerState>;
   timerColorSettings: TimerColorSettings;
   initialize: () => Promise<void>;
-  createRundownItem: (item: { title: string; speaker: string; durationMs: number; notes: string; supportingFiles: string[] }) => Promise<void>;
-  updateRundownItem: (item: { id: string; title: string; speaker: string; durationMs: number; notes: string; supportingFiles: string[] }) => Promise<void>;
+  createRundownItem: (item: { title: string; speaker: string; durationMs: number; timingMode: RundownTimingMode; endTime: string | null; notes: string; supportingFiles: string[] }) => Promise<void>;
+  updateRundownItem: (item: { id: string; title: string; speaker: string; durationMs: number; timingMode: RundownTimingMode; endTime: string | null; notes: string; supportingFiles: string[] }) => Promise<void>;
   deleteRundownItem: (itemId: string) => Promise<void>;
   startTimer: () => Promise<void>;
   pauseTimer: () => Promise<void>;
@@ -125,6 +148,8 @@ export const useTempoCueStore = create<StoreState>((set, get) => ({
         title: item.title,
         speaker: item.speaker,
         durationMs: item.durationMs,
+        timingMode: item.timingMode,
+        endTime: item.endTime,
         notes: item.notes,
         supportingFiles: item.supportingFiles,
       });
@@ -138,18 +163,16 @@ export const useTempoCueStore = create<StoreState>((set, get) => ({
       notes: item.notes,
       supportingFiles: item.supportingFiles,
       durationMs: item.durationMs,
+      timingMode: item.timingMode,
+      endTime: item.endTime,
       color: nextItemColor(get().rundown.length),
       completed: false,
     };
-    const timer = createIdleTimer(item.durationMs);
     set((state) => ({
       rundown: [...state.rundown, newItem],
-      output: { ...state.output, activeItemId: newItem.id },
-      timer,
       timersByItem: {
         ...state.timersByItem,
         [state.output.activeItemId]: state.timer,
-        [newItem.id]: timer,
       },
     }));
   },
@@ -161,6 +184,8 @@ export const useTempoCueStore = create<StoreState>((set, get) => ({
         title: item.title,
         speaker: item.speaker,
         durationMs: item.durationMs,
+        timingMode: item.timingMode,
+        endTime: item.endTime,
         notes: item.notes,
         supportingFiles: item.supportingFiles,
       });
@@ -168,7 +193,18 @@ export const useTempoCueStore = create<StoreState>((set, get) => ({
     }
 
     set((state) => {
-      const timer = item.id === state.output.activeItemId ? { ...state.timer, durationMs: item.durationMs } : state.timer;
+      const nextItem = {
+        id: item.id,
+        title: item.title,
+        speaker: item.speaker,
+        durationMs: item.durationMs,
+        timingMode: item.timingMode,
+        endTime: item.endTime,
+        notes: item.notes,
+        supportingFiles: item.supportingFiles,
+      };
+      const nextTimer = createTimerForRundownItem(nextItem, Date.now() + state.clockOffsetMs);
+      const timer = item.id === state.output.activeItemId ? nextTimer : state.timer;
       return {
         rundown: state.rundown.map((rundownItem) =>
           rundownItem.id === item.id
@@ -177,6 +213,8 @@ export const useTempoCueStore = create<StoreState>((set, get) => ({
                 title: item.title,
                 speaker: item.speaker,
                 durationMs: item.durationMs,
+                timingMode: item.timingMode,
+                endTime: item.endTime,
                 notes: item.notes,
                 supportingFiles: item.supportingFiles,
               }
@@ -185,7 +223,7 @@ export const useTempoCueStore = create<StoreState>((set, get) => ({
         timer,
         timersByItem: {
           ...state.timersByItem,
-          [item.id]: { ...(state.timersByItem[item.id] ?? createIdleTimer(item.durationMs)), durationMs: item.durationMs },
+          [item.id]: nextTimer,
           ...(item.id === state.output.activeItemId ? { [item.id]: timer } : {}),
         },
       };
@@ -209,7 +247,7 @@ export const useTempoCueStore = create<StoreState>((set, get) => ({
       }
 
       const next = rundown[Math.min(index, rundown.length - 1)];
-      const timer = timersByItem[next.id] ?? createIdleTimer(next.durationMs);
+      const timer = timersByItem[next.id] ?? createTimerForRundownItem(next, Date.now() + state.clockOffsetMs);
       return {
         rundown,
         output: { ...state.output, activeItemId: next.id },
@@ -273,7 +311,7 @@ export const useTempoCueStore = create<StoreState>((set, get) => ({
   resetTimer: async () => {
     if (canInvoke) return invoke("reset_timer");
     const active = get().rundown.find((item) => item.id === get().output.activeItemId);
-    const timer = createIdleTimer(active?.durationMs ?? DEFAULT_DURATION_MS);
+    const timer = active ? createTimerForRundownItem(active, Date.now() + get().clockOffsetMs) : createIdleTimer(DEFAULT_DURATION_MS);
     set((state) => ({
       timer,
       timersByItem: {
@@ -285,11 +323,37 @@ export const useTempoCueStore = create<StoreState>((set, get) => ({
 
   addTime: async (deltaMs: number) => {
     if (canInvoke) return invoke("add_time", { deltaMs });
-    mutateLocalTimer(set, (timer) => ({
-      ...timer,
-      durationMs: Math.max(0, timer.durationMs + deltaMs),
-      targetEndAtMs: timer.targetEndAtMs === null ? null : timer.targetEndAtMs + deltaMs,
-    }));
+    set((state) => {
+      const timer = {
+        ...state.timer,
+        durationMs: Math.max(0, state.timer.durationMs + deltaMs),
+        targetEndAtMs: state.timer.targetEndAtMs === null ? null : state.timer.targetEndAtMs + deltaMs,
+      };
+      const activeItem = state.rundown.find((item) => item.id === state.output.activeItemId);
+      const shouldUpdateEndTime =
+        activeItem?.timingMode === "end-time" &&
+        timer.mode === "end-at-time" &&
+        timer.targetEndAtMs !== null;
+
+      return {
+        timer,
+        rundown: shouldUpdateEndTime
+          ? state.rundown.map((item) =>
+              item.id === state.output.activeItemId
+                ? {
+                    ...item,
+                    durationMs: timer.durationMs,
+                    endTime: formatTimeInput(timer.targetEndAtMs ?? Date.now()),
+                  }
+                : item,
+            )
+          : state.rundown,
+        timersByItem: {
+          ...state.timersByItem,
+          [state.output.activeItemId]: timer,
+        },
+      };
+    });
   },
 
   setDuration: async (durationMs: number) => {
@@ -335,7 +399,7 @@ export const useTempoCueStore = create<StoreState>((set, get) => ({
     const active = get().rundown.find((item) => item.id === itemId);
     set((state) => ({
       output: { ...state.output, activeItemId: itemId },
-      timer: state.timersByItem[itemId] ?? createIdleTimer(active?.durationMs ?? DEFAULT_DURATION_MS),
+      timer: state.timersByItem[itemId] ?? (active ? createTimerForRundownItem(active, Date.now() + state.clockOffsetMs) : createIdleTimer(DEFAULT_DURATION_MS)),
       timersByItem: {
         ...state.timersByItem,
         [state.output.activeItemId]: state.timer,
@@ -476,6 +540,30 @@ function setTimerRemaining(timer: TimerState, remainingMs: number, now: number):
     pausedAtMs: timer.status === "idle" ? now : timer.pausedAtMs,
     accumulatedPauseMs: timer.status === "idle" ? 0 : timer.accumulatedPauseMs,
     remainingAtPauseMs: remaining,
+    serverNowMs: now,
+  };
+}
+
+function createTimerForRundownItem(
+  item: Pick<RundownItem, "durationMs" | "timingMode" | "endTime">,
+  now: number,
+): TimerState {
+  const timer = createIdleTimer(item.durationMs);
+  if (item.timingMode !== "end-time" || !item.endTime) return timer;
+
+  const targetEndAtMs = targetTimeToMs(item.endTime, now);
+  if (targetEndAtMs === null) return timer;
+
+  return {
+    ...timer,
+    mode: "end-at-time",
+    status: "idle",
+    durationMs: Math.max(0, targetEndAtMs - now),
+    startedAtMs: null,
+    pausedAtMs: null,
+    accumulatedPauseMs: 0,
+    remainingAtPauseMs: null,
+    targetEndAtMs,
     serverNowMs: now,
   };
 }

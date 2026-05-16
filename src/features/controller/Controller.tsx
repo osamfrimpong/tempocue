@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type TouchEvent } from "react";
 import { Link } from "react-router-dom";
+import { TimePicker } from "@asphalt-react/time-picker";
 import {
   Ban,
   Bold,
+  ChevronDown,
   Clock,
   Check,
   Copy,
@@ -18,9 +20,11 @@ import {
   Pause,
   Play,
   Plus,
+  Radio,
   RotateCcw,
   Settings,
   SkipForward,
+  Square,
   Trash2,
   X,
   Zap,
@@ -33,10 +37,11 @@ import { TimerDisplay } from "../../components/timer/TimerDisplay";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
 import { useTicker } from "../../hooks/useTicker";
 import { useTempoCueStore } from "../../stores/useTempoCueStore";
-import { formatDurationInput, formatTimeInput, parseDuration } from "../../lib/timer";
+import { formatDurationInput, formatTimeInput, parseDuration, targetTimeToMs } from "../../lib/timer";
 import type { OutputMessage, OutputMessageTextStyle, RundownItem } from "../../types/timer";
 
 type ItemDialogMode = "create" | "edit";
+type ItemTimingMode = "duration" | "end-time";
 type MessageStylePart = "title" | "body";
 
 const messageColourOptions = ["#ffffff", "#3ddc97", "#f5c542", "#5cc8ff", "#ff7a59", "#f25f8c"];
@@ -53,9 +58,7 @@ export function Controller() {
   const pauseTimer = useTempoCueStore((state) => state.pauseTimer);
   const resetTimer = useTempoCueStore((state) => state.resetTimer);
   const addTime = useTempoCueStore((state) => state.addTime);
-  const setDuration = useTempoCueStore((state) => state.setDuration);
   const setRemaining = useTempoCueStore((state) => state.setRemaining);
-  const setEndAtTime = useTempoCueStore((state) => state.setEndAtTime);
   const skipTimer = useTempoCueStore((state) => state.skipTimer);
   const selectRundownItem = useTempoCueStore((state) => state.selectRundownItem);
   const createRundownItem = useTempoCueStore((state) => state.createRundownItem);
@@ -66,8 +69,6 @@ export function Controller() {
   const showMessage = useTempoCueStore((state) => state.showMessage);
   const hideMessage = useTempoCueStore((state) => state.hideMessage);
   const now = useTicker(100) + clockOffsetMs;
-  const [durationInput, setDurationInput] = useState(formatDurationInput(timer.durationMs));
-  const [targetTimeInput, setTargetTimeInput] = useState("");
   const [messageTitle, setMessageTitle] = useState("Next");
   const [messageBody, setMessageBody] = useState("Please welcome the next speaker");
   const [messageFormatting, setMessageFormatting] = useState({
@@ -75,12 +76,16 @@ export function Controller() {
     body: { bold: true, italic: false, color: "#ffffff" },
   });
   const [newTitle, setNewTitle] = useState("");
-  const [newSpeaker, setNewSpeaker] = useState("");
   const [newDuration, setNewDuration] = useState("10:00");
+  const [newEndTime, setNewEndTime] = useState(formatTimeInput(now));
+  const [itemTimingMode, setItemTimingMode] = useState<ItemTimingMode>("duration");
   const [newNotes, setNewNotes] = useState("");
-  const [newSupportingFiles, setNewSupportingFiles] = useState("");
   const [itemDialogMode, setItemDialogMode] = useState<ItemDialogMode | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [isLive, setIsLive] = useState(false);
+  const [localUrlsExpanded, setLocalUrlsExpanded] = useState(false);
+  const previousNetworkHost = useRef<string | null>(null);
+  const [networkChanged, setNetworkChanged] = useState(false);
 
   useKeyboardShortcuts();
 
@@ -89,12 +94,15 @@ export function Controller() {
   }, [initialize]);
 
   useEffect(() => {
-    setDurationInput(formatDurationInput(timer.durationMs));
-  }, [timer.durationMs]);
+    if (previousNetworkHost.current !== null && previousNetworkHost.current !== urls.networkHost) {
+      setNetworkChanged(true);
+      const timeout = window.setTimeout(() => setNetworkChanged(false), 5000);
+      previousNetworkHost.current = urls.networkHost;
+      return () => window.clearTimeout(timeout);
+    }
 
-  useEffect(() => {
-    setTargetTimeInput(timer.targetEndAtMs === null ? "" : formatTimeInput(timer.targetEndAtMs));
-  }, [timer.targetEndAtMs]);
+    previousNetworkHost.current = urls.networkHost;
+  }, [urls.networkHost]);
 
   const activeIndex = useMemo(
     () => rundown.findIndex((item) => item.id === output.activeItemId),
@@ -103,16 +111,27 @@ export function Controller() {
   const active = rundown[activeIndex] ?? rundown[0];
   const next = rundown[activeIndex + 1];
   const rundownItemActionsDisabled = timer.status === "running";
-
-  const handleDurationBlur = () => {
-    const parsed = parseDuration(durationInput);
-    if (parsed !== null) void setDuration(parsed);
-    else setDurationInput(formatDurationInput(timer.durationMs));
-  };
-
-  const handleSetEndAtTime = () => {
-    if (targetTimeInput) void setEndAtTime(targetTimeInput);
-  };
+  const outputStatusLabel = !isLive ? "Output inactive" : output.blackout ? "Blackout" : "Output active";
+  const controllerTimerLabel = active?.timingMode === "end-time" ? "End at" : "Duration";
+  const controllerTimerValue =
+    active?.timingMode === "end-time" && active.endTime
+      ? formatDisplayTime(timeInputToDate(active.endTime, now).getTime())
+      : formatDurationInput(timer.durationMs);
+  const itemDurationMs =
+    itemTimingMode === "duration"
+      ? parseDuration(newDuration)
+      : newEndTime
+        ? (() => {
+            const targetMs = targetTimeToMs(newEndTime, now);
+            return targetMs === null ? null : Math.max(0, targetMs - now);
+          })()
+        : null;
+  const itemCanSave = Boolean(newTitle.trim()) && itemDurationMs !== null;
+  const networkStatusLabel = networkChanged
+    ? "Network changed: URLs updated"
+    : urls.network
+      ? `Network available: ${urls.networkHost}`
+      : "Offline: local-only URLs active";
 
   const sendMessage = () => {
     const message: OutputMessage = {
@@ -141,56 +160,66 @@ export function Controller() {
     setItemDialogMode(null);
     setEditingItemId(null);
     setNewTitle("");
-    setNewSpeaker("");
     setNewDuration("10:00");
+    setNewEndTime(formatTimeInput(now));
+    setItemTimingMode("duration");
     setNewNotes("");
-    setNewSupportingFiles("");
   };
 
   const openCreateDialog = () => {
     setNewTitle("");
-    setNewSpeaker("");
     setNewDuration("10:00");
+    setNewEndTime(formatTimeInput(now));
+    setItemTimingMode("duration");
     setNewNotes("");
-    setNewSupportingFiles("");
     setEditingItemId(null);
     setItemDialogMode("create");
   };
 
   const openEditDialog = (item: RundownItem) => {
     setNewTitle(item.title);
-    setNewSpeaker(item.speaker);
     setNewDuration(formatDurationInput(item.durationMs));
+    setNewEndTime(item.endTime ?? formatTimeInput(now));
+    setItemTimingMode(item.timingMode);
     setNewNotes(item.notes);
-    setNewSupportingFiles(item.supportingFiles.join("\n"));
     setEditingItemId(item.id);
     setItemDialogMode("edit");
   };
 
   const saveRundownItem = () => {
-    const durationMs = parseDuration(newDuration);
     const title = newTitle.trim();
-    if (!title || durationMs === null) return;
+    if (!title || itemDurationMs === null) return;
+    const existingItem = editingItemId ? rundown.find((item) => item.id === editingItemId) : null;
 
     if (itemDialogMode === "edit" && editingItemId) {
       void updateRundownItem({
         id: editingItemId,
         title,
-        speaker: newSpeaker.trim(),
-        durationMs,
+        speaker: existingItem?.speaker ?? "",
+        durationMs: itemDurationMs,
+        timingMode: itemTimingMode,
+        endTime: itemTimingMode === "end-time" ? newEndTime : null,
         notes: newNotes.trim(),
-        supportingFiles: parseSupportingFiles(newSupportingFiles),
+        supportingFiles: existingItem?.supportingFiles ?? [],
       });
     } else {
       void createRundownItem({
         title,
-        speaker: newSpeaker.trim(),
-        durationMs,
+        speaker: "",
+        durationMs: itemDurationMs,
+        timingMode: itemTimingMode,
+        endTime: itemTimingMode === "end-time" ? newEndTime : null,
         notes: newNotes.trim(),
-        supportingFiles: parseSupportingFiles(newSupportingFiles),
+        supportingFiles: [],
       });
     }
     closeItemDialog();
+  };
+
+  const openTimePickerFromField = (event: MouseEvent<HTMLDivElement> | TouchEvent<HTMLDivElement>) => {
+    if (!(event.target instanceof HTMLInputElement)) return;
+    const button = event.currentTarget.querySelector<HTMLButtonElement>('[data-testid="time-button"]');
+    button?.click();
   };
 
   return (
@@ -206,8 +235,18 @@ export function Controller() {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-3">
+          <Button disabled={isLive} onClick={() => setIsLive(true)}>
+            <Radio className="h-4 w-4" />
+            Go Live
+          </Button>
+          {isLive && (
+            <Button variant="destructive" onClick={() => setIsLive(false)}>
+              <Square className="h-4 w-4" />
+              End Live
+            </Button>
+          )}
           <Badge variant={connected ? "default" : "outline"}>{connected ? "WebSocket live" : "Local preview"}</Badge>
-          <Badge variant={output.blackout ? "danger" : "outline"}>{output.blackout ? "Blackout" : "Output active"}</Badge>
+          <Badge variant={isLive && output.blackout ? "danger" : isLive ? "default" : "outline"}>{outputStatusLabel}</Badge>
           <Link
             to="/settings"
             className="grid h-10 w-10 place-items-center rounded-md hover:bg-accent"
@@ -307,34 +346,14 @@ export function Controller() {
               <TimerDisplay timer={timer} nowMs={now} onRemainingChange={(remainingMs) => void setRemaining(remainingMs)} />
             </div>
 
-            <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(12rem,16rem)_auto]">
+            <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
               <div className="grid min-w-0 gap-2">
-                <div className="text-xs font-medium uppercase text-muted-foreground">Duration</div>
-                <Input
-                  aria-label="Timer duration"
-                  value={durationInput}
-                  onChange={(event) => setDurationInput(event.target.value)}
-                  onBlur={handleDurationBlur}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") event.currentTarget.blur();
-                  }}
-                />
-              </div>
-              <div className="grid min-w-0 gap-2">
-                <div className="text-xs font-medium uppercase text-muted-foreground">End at</div>
-                <div className="flex min-w-0 gap-2">
-                  <Input
-                    aria-label="End at time"
-                    type="time"
-                    value={targetTimeInput}
-                    onChange={(event) => setTargetTimeInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") handleSetEndAtTime();
-                    }}
-                  />
-                  <Button variant={timer.mode === "end-at-time" ? "default" : "secondary"} onClick={handleSetEndAtTime}>
-                    Set
-                  </Button>
+                <div className="text-xs font-medium uppercase text-muted-foreground">{controllerTimerLabel}</div>
+                <div
+                  className="flex h-10 w-full items-center rounded-md border border-input bg-background px-3 py-2 font-mono text-sm text-foreground tabular-nums"
+                  aria-label={controllerTimerLabel}
+                >
+                  {controllerTimerValue}
                 </div>
               </div>
               <div className="flex flex-wrap gap-2 pt-0 xl:flex-nowrap xl:pt-6">
@@ -411,12 +430,46 @@ export function Controller() {
           </div>
 
           <div className="min-w-0 rounded-md border border-border bg-card p-4">
-            <div className="mb-3 text-sm font-semibold uppercase text-muted-foreground">Local URLs</div>
-            <UrlRow label="Controller" value={urls.control} />
-            <UrlRow label="Viewer" value={urls.viewer} />
-            <UrlRow label="OBS" value={urls.obs} />
-            <UrlRow label="Lower third" value={urls.lowerThird} />
-            <UrlRow label="Agenda" value={urls.agenda} />
+            <button
+              type="button"
+              className="flex w-full flex-wrap items-center justify-between gap-2 text-left"
+              aria-expanded={localUrlsExpanded}
+              onClick={() => setLocalUrlsExpanded((expanded) => !expanded)}
+            >
+              <span className="flex items-center gap-2">
+                <ChevronDown
+                  className={`h-4 w-4 text-muted-foreground transition-transform ${localUrlsExpanded ? "" : "-rotate-90"}`}
+                />
+                <span className="text-sm font-semibold uppercase text-muted-foreground">Local URLs</span>
+              </span>
+              <Badge variant={urls.network ? "default" : "outline"}>{networkStatusLabel}</Badge>
+            </button>
+            {localUrlsExpanded && (
+              <div className="mt-3">
+                <div className="mb-2 text-xs font-medium uppercase text-muted-foreground">This computer</div>
+                <UrlRow label="Controller" value={urls.local.control} disabled={!isLive} />
+                <UrlRow label="Viewer" value={urls.local.viewer} disabled={!isLive} />
+                <UrlRow label="OBS" value={urls.local.obs} disabled={!isLive} />
+                <UrlRow label="Lower third" value={urls.local.lowerThird} disabled={!isLive} />
+                <UrlRow label="Agenda" value={urls.local.agenda} disabled={!isLive} />
+                <div className="mt-4 border-t border-border pt-4">
+                  <div className="mb-2 text-xs font-medium uppercase text-muted-foreground">Network devices</div>
+                  {urls.network ? (
+                    <>
+                      <UrlRow label="Controller" value={urls.network.control} disabled={!isLive} />
+                      <UrlRow label="Viewer" value={urls.network.viewer} disabled={!isLive} />
+                      <UrlRow label="OBS" value={urls.network.obs} disabled={!isLive} />
+                      <UrlRow label="Lower third" value={urls.network.lowerThird} disabled={!isLive} />
+                      <UrlRow label="Agenda" value={urls.network.agenda} disabled={!isLive} />
+                    </>
+                  ) : (
+                    <div className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                      Network unavailable
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </section>
       </div>
@@ -446,22 +499,56 @@ export function Controller() {
                 value={newTitle}
                 onChange={(event) => setNewTitle(event.target.value)}
               />
-              <div className="grid grid-cols-[1fr_120px] gap-3">
-                <Input
-                  aria-label="Speaker"
-                  placeholder="Speaker"
-                  value={newSpeaker}
-                  onChange={(event) => setNewSpeaker(event.target.value)}
-                />
+              <div className="flex rounded-md border border-border bg-background p-1">
+                <button
+                  type="button"
+                  className={`h-9 flex-1 rounded px-3 text-sm font-medium ${
+                    itemTimingMode === "duration" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent"
+                  }`}
+                  onClick={() => setItemTimingMode("duration")}
+                >
+                  Duration
+                </button>
+                <button
+                  type="button"
+                  className={`h-9 flex-1 rounded px-3 text-sm font-medium ${
+                    itemTimingMode === "end-time" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent"
+                  }`}
+                  onClick={() => {
+                    setNewEndTime(formatTimeInput(now));
+                    setItemTimingMode("end-time");
+                  }}
+                >
+                  End time
+                </button>
+              </div>
+              {itemTimingMode === "duration" ? (
                 <Input
                   aria-label="Duration"
+                  placeholder="Duration"
                   value={newDuration}
                   onChange={(event) => setNewDuration(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") saveRundownItem();
                   }}
                 />
-              </div>
+              ) : (
+                <div onMouseDown={openTimePickerFromField} onTouchStart={openTimePickerFromField}>
+                  <TimePicker
+                    aria-label="End time"
+                    value={[timeInputToDate(newEndTime, now)]}
+                    onChange={(time) => {
+                      const selected = time[0];
+                      if (selected instanceof Date) setNewEndTime(formatTimeInput(selected.getTime()));
+                    }}
+                    onError={() => false}
+                    minuteStep={1}
+                    native={false}
+                    stretch
+                    timeIconLabel="Select end time"
+                  />
+                </div>
+              )}
               <Textarea
                 aria-label="Notes"
                 placeholder="Notes"
@@ -471,17 +558,11 @@ export function Controller() {
                   if (event.key === "Enter" && event.metaKey) saveRundownItem();
                 }}
               />
-              <Textarea
-                aria-label="Supporting files"
-                placeholder="Supporting files, one URL or local file path per line"
-                value={newSupportingFiles}
-                onChange={(event) => setNewSupportingFiles(event.target.value)}
-              />
               <div className="flex justify-end gap-2">
                 <Button variant="secondary" onClick={closeItemDialog}>
                   Cancel
                 </Button>
-                <Button onClick={saveRundownItem} disabled={!newTitle.trim()}>
+                <Button onClick={saveRundownItem} disabled={!itemCanSave}>
                   {itemDialogMode === "edit" ? "Save changes" : "Add item"}
                 </Button>
               </div>
@@ -581,13 +662,6 @@ function SupportingFileLink({
   );
 }
 
-function parseSupportingFiles(value: string) {
-  return value
-    .split(/\r?\n/)
-    .map((file) => file.trim())
-    .filter(Boolean);
-}
-
 function getSupportingFileHref(file: string, itemId: string, index: number, serverBaseUrl: string) {
   if (/^https?:\/\//i.test(file)) return file;
   const base = serverBaseUrl.replace(/\/control\/?$/, "");
@@ -607,10 +681,25 @@ function isBrowserViewableFile(file: string): "image" | "pdf" | null {
   return null;
 }
 
-function UrlRow({ label, value }: { label: string; value: string }) {
+function formatDisplayTime(ms: number) {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(ms));
+}
+
+function timeInputToDate(value: string, nowMs: number) {
+  const [hours = "0", minutes = "0"] = value.split(":");
+  const date = new Date(nowMs);
+  date.setHours(Number(hours), Number(minutes), 0, 0);
+  return date;
+}
+
+function UrlRow({ label, value, disabled }: { label: string; value: string; disabled: boolean }) {
   const [copied, setCopied] = useState(false);
 
   const copyUrl = async () => {
+    if (disabled) return;
     await navigator.clipboard.writeText(value);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1200);
@@ -620,9 +709,16 @@ function UrlRow({ label, value }: { label: string; value: string }) {
     <div className="grid grid-cols-[1fr_auto] items-center gap-3 border-t border-border py-3 first:border-t-0 first:pt-0">
       <div className="min-w-0">
         <div className="text-xs uppercase text-muted-foreground">{label}</div>
-        <div className="select-all overflow-hidden text-ellipsis whitespace-nowrap font-mono text-sm">{value}</div>
+        <div
+          className={`overflow-hidden text-ellipsis whitespace-nowrap font-mono text-sm ${
+            disabled ? "select-none text-muted-foreground/60" : "select-all"
+          }`}
+          aria-disabled={disabled}
+        >
+          {value}
+        </div>
       </div>
-      <Button variant="ghost" size="icon" aria-label={`Copy ${label} URL`} onClick={() => void copyUrl()}>
+      <Button variant="ghost" size="icon" aria-label={`Copy ${label} URL`} disabled={disabled} onClick={() => void copyUrl()}>
         {copied ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
       </Button>
     </div>

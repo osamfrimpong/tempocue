@@ -1,5 +1,6 @@
 export type TimerStatus = "idle" | "running" | "paused" | "finished";
 export type TimerMode = "countdown" | "countup" | "clock" | "end-at-time";
+export type RundownTimingMode = "duration" | "end-time";
 
 export type OvertimeBehavior = "continue" | "stop" | "hide" | "auto-next";
 
@@ -29,6 +30,8 @@ export type RundownItem = {
   notes: string;
   supportingFiles: string[];
   durationMs: number;
+  timingMode: RundownTimingMode;
+  endTime: string | null;
   color: string;
   completed: boolean;
 };
@@ -62,13 +65,19 @@ export type OutputState = {
   activeItemId: string;
 };
 
-export type ServerUrls = {
-  port: number;
+export type UrlSet = {
   control: string;
   viewer: string;
   obs: string;
   lowerThird: string;
   agenda: string;
+};
+
+export type ServerUrls = UrlSet & {
+  port: number;
+  local: UrlSet;
+  network: UrlSet | null;
+  networkHost: string | null;
 };
 
 export type Snapshot = {

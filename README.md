@@ -1,18 +1,38 @@
 # TempoCue
 
-TempoCue is an offline-first desktop stage timer for local presenter and OBS browser-source outputs.
+TempoCue is an offline production timer for local presenter, stage, and OBS browser-source outputs. It is built as a Tauri 2 desktop app with a React/Vite frontend and a Rust backend that owns the shared timer/rundown state.
 
-This repository currently contains the first vertical slice:
+## Current State
 
-- Tauri desktop shell configuration
-- React controller at `/control`
+TempoCue currently includes:
+
+- A desktop controller at `/control`
 - Presenter output at `/viewer`
-- Transparent OBS overlay at `/obs`
+- Transparent OBS overlay at `/obs?transparent=true`
 - Lower-third output at `/lower-third`
 - Agenda output at `/agenda`
-- Local timer state model with start, pause, reset, skip, add/subtract time
-- Rust-owned application state and Axum WebSocket server design on `127.0.0.1:4310`
-- Port fallback through `4319`
+- Timer color threshold settings at `/settings`
+- Countdown and "end at time" timer control
+- Start, pause, reset, next-item, add/subtract time, and direct remaining-time adjustment
+- Editable rundown items with title, speaker, duration, notes, and supporting file paths/URLs
+- Per-rundown-item timer state while switching between items
+- Blackout and hide-timer controls for outputs
+- Lower-third message display with title/body styling, color options, flash, and hide
+- Keyboard shortcuts for common show-control actions
+- WebSocket snapshot/update delivery for output windows
+- Local frontend fallback behavior when running outside Tauri
+
+State is currently in memory. Restarting the app resets the rundown, timer state, and output state to the built-in defaults. Timer color thresholds are stored in browser local storage.
+
+## Architecture
+
+- Frontend: React 19, React Router, Zustand, Tailwind CSS, Vite
+- Desktop shell: Tauri 2
+- Backend: Rust commands plus an Axum output server
+- Realtime transport: WebSocket endpoint at `/ws`
+- Embedded production assets: `rust-embed` serves the built `dist` bundle from the Tauri server
+
+When running in Tauri, frontend actions call Rust commands through `@tauri-apps/api`. The Rust state broadcasts snapshots and updates over WebSocket so browser outputs stay in sync.
 
 ## Development
 
@@ -28,17 +48,31 @@ Run the frontend only:
 npm run dev
 ```
 
-Run the Tauri app:
+Run the Tauri desktop app:
 
 ```bash
 npm run tauri dev
 ```
 
-The Tauri run requires a Rust toolchain. This shell did not have `rustc` or `cargo` available when the initial slice was created.
+Build the frontend:
+
+```bash
+npm run build
+```
+
+Build the Tauri app:
+
+```bash
+npm run tauri build
+```
+
+Tauri development and builds require a Rust toolchain with Cargo.
 
 ## Local URLs
 
-When running inside Tauri, TempoCue starts a local read-only output server:
+In the desktop app, TempoCue starts an output server on port `4310` by default and falls back through `4319` if earlier ports are unavailable.
+
+Typical local URLs:
 
 ```text
 http://localhost:4310/control
@@ -48,12 +82,29 @@ http://localhost:4310/lower-third
 http://localhost:4310/agenda
 ```
 
-If `4310` is unavailable, the app tries the next available port up to `4319` and reports the active URLs in the controller.
+If the backend can detect a non-loopback local IPv4 address, it binds to all interfaces and advertises URLs using that LAN address. Otherwise it binds to localhost. The active URLs and port are shown in the controller.
 
-## Next Implementation Steps
+## Keyboard Shortcuts
 
-1. Add SQLite persistence for projects, rundowns, themes, and messages.
-2. Add CSV import/export and project package export/import.
-3. Expand timer modes beyond countdown/count-up.
-4. Add LAN mode with explicit user opt-in and output-only access controls.
-5. Add automated tests for timer math, duration parsing, WebSocket snapshot delivery, and port fallback.
+- `Space`: start or pause the timer
+- `R`: reset the timer
+- `N`: select the next rundown item
+- `B`: toggle blackout
+- `+`: add one minute
+- `-`: subtract one minute
+- `Esc`: hide the active message
+
+Shortcuts are ignored while typing in text inputs or textareas.
+
+## Supporting Files
+
+Rundown items can include supporting file entries, one per line. HTTP and HTTPS entries open directly. Local file paths are served back through the TempoCue output server at `/supporting-file/...` so the controller can open them from the active item.
+
+## Not Yet Implemented
+
+- Durable project/rundown persistence
+- CSV import/export
+- Project package export/import
+- Explicit LAN sharing controls and output-only access restrictions
+- Additional timer modes surfaced in the UI
+- Automated test coverage for timer math, WebSocket delivery, and server port fallback

@@ -30,10 +30,10 @@ export function createIdleTimer(durationMs = DEFAULT_DURATION_MS): TimerState {
 
 export function getRemainingMs(state: TimerState, nowMs: number) {
   if (state.mode === "clock") return 0;
+  if (state.status === "idle") return state.durationMs;
   if (state.mode === "end-at-time" && state.status !== "paused" && state.targetEndAtMs !== null) {
     return state.targetEndAtMs - nowMs;
   }
-  if (state.status === "idle") return state.durationMs;
   if (state.status === "paused") return state.remainingAtPauseMs ?? state.durationMs;
   if (state.status === "finished") return 0;
   if (!state.startedAtMs) return state.durationMs;
