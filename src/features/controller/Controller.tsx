@@ -230,8 +230,8 @@ export function Controller() {
   };
 
   return (
-    <main className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
-      <header className="flex h-16 shrink-0 items-center justify-between gap-4 border-b border-border px-5">
+    <main className="flex h-dvh w-screen flex-col overflow-hidden bg-background text-foreground">
+      <header className="flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-3 py-3 sm:px-5 lg:h-16 lg:flex-nowrap lg:py-0">
         <div className="flex min-w-0 items-center gap-3">
           <div className="grid h-9 w-9 place-items-center rounded-md bg-primary text-primary-foreground">
             <Clock className="h-5 w-5" />
@@ -241,13 +241,13 @@ export function Controller() {
             <div className="truncate text-xs text-muted-foreground">Offline production timer</div>
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-3">
-          <Button disabled={isLive} onClick={() => void setLive(true)}>
+        <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2 sm:gap-3 lg:flex-none">
+          <Button className="min-w-0" disabled={isLive} onClick={() => void setLive(true)}>
             <Radio className="h-4 w-4" />
             Go Live
           </Button>
           {isLive && (
-            <Button variant="destructive" onClick={() => void setLive(false)}>
+            <Button className="min-w-0" variant="destructive" onClick={() => void setLive(false)}>
               <Square className="h-4 w-4" />
               End Live
             </Button>
@@ -264,8 +264,8 @@ export function Controller() {
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(14rem,18rem)_minmax(0,1fr)_minmax(18rem,22rem)] gap-4 overflow-hidden p-4">
-        <section className="flex min-w-0 flex-col overflow-hidden rounded-md border border-border bg-card">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto p-3 lg:grid-cols-[minmax(14rem,18rem)_minmax(0,1fr)_minmax(18rem,22rem)] lg:gap-4 lg:overflow-hidden lg:p-4">
+        <section className="flex min-w-0 flex-col rounded-md border border-border bg-card lg:min-h-0 lg:overflow-hidden">
           <div className="border-b border-border p-4">
             <div className="text-sm font-semibold uppercase text-muted-foreground">Rundown</div>
             <div className="mt-1 flex items-center justify-between gap-3">
@@ -275,7 +275,7 @@ export function Controller() {
               </Button>
             </div>
           </div>
-          <div className="grid min-h-0 flex-1 content-start gap-2 overflow-y-auto p-3">
+          <div className="grid max-h-80 min-h-0 flex-1 content-start gap-2 overflow-y-auto p-3 lg:max-h-none">
             {rundown.map((item, index) => (
               <div
                 key={item.id}
@@ -319,15 +319,15 @@ export function Controller() {
           </div>
         </section>
 
-        <section className="grid min-w-0 gap-4 overflow-hidden">
-          <div className="min-w-0 overflow-y-auto rounded-md border border-border bg-card p-5">
-            <div className="flex items-start justify-between gap-4">
-              <div>
+        <section className="grid min-w-0 gap-3 lg:gap-4 lg:overflow-hidden">
+          <div className="min-w-0 rounded-md border border-border bg-card p-4 lg:overflow-y-auto lg:p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
+              <div className="min-w-0">
                 <div className="text-sm uppercase text-muted-foreground">Active item</div>
-                <h1 className="mt-1 text-3xl font-semibold">{active?.title}</h1>
+                <h1 className="mt-1 break-words text-2xl font-semibold sm:text-3xl">{active?.title}</h1>
                 <div className="mt-1 text-muted-foreground">{active?.speaker}</div>
               </div>
-              {next && <Badge variant="outline">Next: {next.title}</Badge>}
+              {next && <Badge className="max-w-full" variant="outline">Next: {next.title}</Badge>}
             </div>
             {active?.supportingFiles?.length ? (
               <div className="mt-4 grid gap-2">
@@ -349,7 +349,7 @@ export function Controller() {
               </div>
             ) : null}
 
-            <div className="grid min-h-80 min-w-0 place-items-center">
+            <div className="grid min-h-52 min-w-0 place-items-center sm:min-h-64 lg:min-h-80">
               <TimerDisplay timer={timer} nowMs={now} onRemainingChange={(remainingMs) => void setRemaining(remainingMs)} />
             </div>
 
@@ -363,36 +363,36 @@ export function Controller() {
                   {controllerTimerValue}
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2 pt-0 xl:flex-nowrap xl:pt-6">
-                <Button onClick={() => void (timer.status === "running" ? pauseTimer() : startTimer())}>
+              <div className="grid grid-cols-3 gap-2 pt-0 sm:flex sm:flex-wrap xl:flex-nowrap xl:pt-6">
+                <Button className="min-w-0 px-3 sm:px-4" onClick={() => void (timer.status === "running" ? pauseTimer() : startTimer())}>
                   {timer.status === "running" ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                   {timer.status === "running" ? "Pause" : "Start"}
                 </Button>
-                <Button variant="secondary" onClick={() => void resetTimer()}>
+                <Button className="min-w-0 px-3 sm:px-4" variant="secondary" onClick={() => void resetTimer()}>
                   <RotateCcw className="h-4 w-4" />
                   Reset
                 </Button>
-                <Button variant="secondary" onClick={() => void skipTimer()}>
+                <Button className="min-w-0 px-3 sm:px-4" variant="secondary" onClick={() => void skipTimer()}>
                   <SkipForward className="h-4 w-4" />
                   Next
                 </Button>
               </div>
             </div>
 
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button variant="outline" onClick={() => void addTime(60_000)}>
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+              <Button className="min-w-0 px-3 sm:px-4" variant="outline" onClick={() => void addTime(60_000)}>
                 <Plus className="h-4 w-4" />
                 1 min
               </Button>
-              <Button variant="outline" onClick={() => void addTime(-60_000)}>
+              <Button className="min-w-0 px-3 sm:px-4" variant="outline" onClick={() => void addTime(-60_000)}>
                 <Minus className="h-4 w-4" />
                 1 min
               </Button>
-              <Button variant={output.blackout ? "destructive" : "outline"} onClick={() => void setBlackout(!output.blackout)}>
+              <Button className="min-w-0 px-3 sm:px-4" variant={output.blackout ? "destructive" : "outline"} onClick={() => void setBlackout(!output.blackout)}>
                 <Ban className="h-4 w-4" />
                 Blackout
               </Button>
-              <Button variant={output.hideTimer ? "destructive" : "outline"} onClick={() => void setHideTimer(!output.hideTimer)}>
+              <Button className="min-w-0 px-3 sm:px-4" variant={output.hideTimer ? "destructive" : "outline"} onClick={() => void setHideTimer(!output.hideTimer)}>
                 <EyeOff className="h-4 w-4" />
                 Hide timer
               </Button>
@@ -400,7 +400,7 @@ export function Controller() {
           </div>
         </section>
 
-        <section className="grid min-w-0 content-start gap-4 overflow-y-auto">
+        <section className="grid min-w-0 content-start gap-3 lg:gap-4 lg:overflow-y-auto">
           <div className="min-w-0 rounded-md border border-border bg-card p-4">
             <div className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase text-muted-foreground">
               <MessageSquare className="h-4 w-4" />
@@ -419,17 +419,17 @@ export function Controller() {
                 style={messageFormatting.body}
                 onChange={(updater) => updateMessageStyle("body", updater)}
               />
-              <div className="flex gap-2">
-                <Button onClick={sendMessage} disabled={Boolean(output.message)}>
+              <div className="grid grid-cols-3 gap-2 sm:flex">
+                <Button className="min-w-0 px-3 sm:px-4" onClick={sendMessage} disabled={Boolean(output.message)}>
                   Show
                 </Button>
                 {output.message && (
-                  <Button variant={output.message.flashing ? "default" : "outline"} onClick={toggleMessageFlash}>
+                  <Button className="min-w-0 px-3 sm:px-4" variant={output.message.flashing ? "default" : "outline"} onClick={toggleMessageFlash}>
                     <Zap className="h-4 w-4" />
                     {output.message.flashing ? "Stop flash" : "Flash"}
                   </Button>
                 )}
-                <Button variant="secondary" onClick={() => void hideMessage()}>
+                <Button className="min-w-0 px-3 sm:px-4" variant="secondary" onClick={() => void hideMessage()}>
                   Hide
                 </Button>
               </div>
@@ -481,7 +481,7 @@ export function Controller() {
         </section>
       </div>
 
-      <footer className="flex h-14 shrink-0 items-center justify-between gap-4 border-t border-border px-5 text-sm text-muted-foreground">
+      <footer className="flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-2 border-t border-border px-3 py-3 text-sm text-muted-foreground sm:px-5 lg:h-14 lg:flex-nowrap lg:py-0">
         <span className="min-w-0 truncate">Space start/pause · R reset · N next · B blackout · +/- adjust time · Esc clear message</span>
         <span className="shrink-0">Server port {urls.port}</span>
       </footer>
