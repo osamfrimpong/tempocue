@@ -35,6 +35,7 @@ import { Input } from "../../components/ui/input";
 import { Textarea } from "../../components/ui/textarea";
 import { Badge } from "../../components/ui/badge";
 import { TimerDisplay } from "../../components/timer/TimerDisplay";
+import { FormattedMessage } from "../../components/layout/FormattedMessage";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
 import { useTicker } from "../../hooks/useTicker";
 import { useTempoCueStore } from "../../stores/useTempoCueStore";
@@ -327,7 +328,11 @@ export function Controller() {
                 <h1 className="mt-1 break-words text-2xl font-semibold sm:text-3xl">{active?.title}</h1>
                 <div className="mt-1 text-muted-foreground">{active?.speaker}</div>
               </div>
-              {next && <Badge className="max-w-full" variant="outline">Next: {next.title}</Badge>}
+              {next && (
+                <Badge className="max-w-full" variant="outline">
+                  Next: {next.title}
+                </Badge>
+              )}
             </div>
             {active?.supportingFiles?.length ? (
               <div className="mt-4 grid gap-2">
@@ -349,7 +354,15 @@ export function Controller() {
               </div>
             ) : null}
 
-            <div className="grid min-h-52 min-w-0 place-items-center sm:min-h-64 lg:min-h-80">
+            <div className="grid min-h-52 min-w-0 place-items-center gap-5 py-5 text-center sm:min-h-64 lg:min-h-80">
+              {output.message && (
+                <FormattedMessage
+                  message={output.message}
+                  className={output.message.flashing ? "message-flash" : undefined}
+                  titleClassName="text-xl font-semibold"
+                  bodyClassName="text-3xl font-bold sm:text-4xl"
+                />
+              )}
               <TimerDisplay timer={timer} nowMs={now} onRemainingChange={(remainingMs) => void setRemaining(remainingMs)} />
             </div>
 
@@ -364,7 +377,10 @@ export function Controller() {
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-2 pt-0 sm:flex sm:flex-wrap xl:flex-nowrap xl:pt-6">
-                <Button className="min-w-0 px-3 sm:px-4" onClick={() => void (timer.status === "running" ? pauseTimer() : startTimer())}>
+                <Button
+                  className="min-w-0 px-3 sm:px-4"
+                  onClick={() => void (timer.status === "running" ? pauseTimer() : startTimer())}
+                >
                   {timer.status === "running" ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                   {timer.status === "running" ? "Pause" : "Start"}
                 </Button>
@@ -388,11 +404,19 @@ export function Controller() {
                 <Minus className="h-4 w-4" />
                 1 min
               </Button>
-              <Button className="min-w-0 px-3 sm:px-4" variant={output.blackout ? "destructive" : "outline"} onClick={() => void setBlackout(!output.blackout)}>
+              <Button
+                className="min-w-0 px-3 sm:px-4"
+                variant={output.blackout ? "destructive" : "outline"}
+                onClick={() => void setBlackout(!output.blackout)}
+              >
                 <Ban className="h-4 w-4" />
                 Blackout
               </Button>
-              <Button className="min-w-0 px-3 sm:px-4" variant={output.hideTimer ? "destructive" : "outline"} onClick={() => void setHideTimer(!output.hideTimer)}>
+              <Button
+                className="min-w-0 px-3 sm:px-4"
+                variant={output.hideTimer ? "destructive" : "outline"}
+                onClick={() => void setHideTimer(!output.hideTimer)}
+              >
                 <EyeOff className="h-4 w-4" />
                 Hide timer
               </Button>
@@ -424,7 +448,11 @@ export function Controller() {
                   Show
                 </Button>
                 {output.message && (
-                  <Button className="min-w-0 px-3 sm:px-4" variant={output.message.flashing ? "default" : "outline"} onClick={toggleMessageFlash}>
+                  <Button
+                    className="min-w-0 px-3 sm:px-4"
+                    variant={output.message.flashing ? "default" : "outline"}
+                    onClick={toggleMessageFlash}
+                  >
                     <Zap className="h-4 w-4" />
                     {output.message.flashing ? "Stop flash" : "Flash"}
                   </Button>
