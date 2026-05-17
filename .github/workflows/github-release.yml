@@ -12,9 +12,25 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  windows-installer-release:
-    name: Build and publish Windows installer
-    runs-on: windows-latest
+  build-installers:
+    name: Build ${{ matrix.name }} installer
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            bundle: nsis
+            artifact-name: TempoCue-windows-installer
+            artifact-path: src-tauri/target/release/bundle/nsis/*.exe
+            cache-prefix: windows-cargo
+          - name: macOS
+            os: macos-latest
+            bundle: dmg
+            artifact-name: TempoCue-macos-installer
+            artifact-path: src-tauri/target/release/bundle/dmg/*.dmg
+            cache-prefix: macos-cargo
 
     steps:
       - name: Checkout repository
@@ -36,18 +52,37 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             src-tauri/target
-          key: windows-cargo-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          key: ${{ matrix.cache-prefix }}-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
           restore-keys: |
-            windows-cargo-${{ runner.os }}-
+            ${{ matrix.cache-prefix }}-${{ runner.os }}-
 
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build Windows installer
-        run: npm run tauri build -- --bundles nsis
+      - name: Build installer
+        run: npm run tauri build -- --bundles ${{ matrix.bundle }}
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: ${{ matrix.artifact-path }}
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: build-installers
+
+    steps:
+      - name: Download installer artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: src-tauri/target/release/bundle/nsis/*.exe
+          files: release-assets/*
           generate_release_notes: true
