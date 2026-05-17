@@ -11,6 +11,7 @@ import {
   ExternalLink,
   EyeOff,
   FileText,
+  Heart,
   Image,
   Italic,
   MessageSquare,
@@ -511,6 +512,10 @@ export function Controller() {
 
       <footer className="flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-2 border-t border-border px-3 py-3 text-sm text-muted-foreground sm:px-5 lg:h-14 lg:flex-nowrap lg:py-0">
         <span className="min-w-0 truncate">Space start/pause · R reset · N next · B blackout · +/- adjust time · Esc clear message</span>
+        <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap">
+          Made with <Heart className="h-3.5 w-3.5 fill-current text-destructive" aria-label="love" /> by Schandorf
+          Osam-Frimpong
+        </span>
         <span className="shrink-0">Server port {urls.port}</span>
       </footer>
 

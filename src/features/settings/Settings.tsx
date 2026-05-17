@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, RotateCcw, Save } from "lucide-react";
+import { ArrowLeft, CheckCircle2, RotateCcw, Save } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { DEFAULT_TIMER_COLOR_SETTINGS, TIMER_COLORS, formatDurationInput, parseDuration } from "../../lib/timer";
@@ -11,6 +11,7 @@ export function Settings() {
   const setTimerColorSettings = useTempoCueStore((state) => state.setTimerColorSettings);
   const [yellowInput, setYellowInput] = useState(formatDurationInput(timerColorSettings.yellowThresholdMs));
   const [redInput, setRedInput] = useState(formatDurationInput(timerColorSettings.redThresholdMs));
+  const [saveToastVisible, setSaveToastVisible] = useState(false);
 
   useEffect(() => {
     setYellowInput(formatDurationInput(timerColorSettings.yellowThresholdMs));
@@ -38,11 +39,22 @@ export function Settings() {
       yellowThresholdMs: parsed.yellow,
       redThresholdMs: parsed.red,
     });
+    setSaveToastVisible(true);
   };
 
   const resetSettings = () => {
     setTimerColorSettings(DEFAULT_TIMER_COLOR_SETTINGS);
   };
+
+  useEffect(() => {
+    if (!saveToastVisible) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setSaveToastVisible(false);
+    }, 2500);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [saveToastVisible]);
 
   return (
     <main className="min-h-screen bg-background p-8 text-foreground">
@@ -101,8 +113,18 @@ export function Settings() {
             </Button>
           </div>
         </section>
-
       </div>
+
+      {saveToastVisible && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-6 right-6 flex max-w-sm items-center gap-3 rounded-md border border-primary/40 bg-card px-4 py-3 text-sm font-medium text-card-foreground shadow-lg shadow-black/30"
+        >
+          <CheckCircle2 className="h-5 w-5 text-primary" />
+          Settings saved.
+        </div>
+      )}
     </main>
   );
 }
