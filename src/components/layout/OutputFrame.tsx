@@ -7,9 +7,10 @@ import { cn } from "../../lib/utils";
 
 type OutputFrameProps = {
   mode: "viewer" | "obs" | "lower-third" | "agenda";
+  transparent?: boolean;
 };
 
-export function OutputFrame({ mode }: OutputFrameProps) {
+export function OutputFrame({ mode, transparent = false }: OutputFrameProps) {
   const initialize = useTempoCueStore((state) => state.initialize);
   const timer = useTempoCueStore((state) => state.timer);
   const clockOffsetMs = useTempoCueStore((state) => state.clockOffsetMs);
@@ -30,7 +31,11 @@ export function OutputFrame({ mode }: OutputFrameProps) {
   }, [initialize]);
 
   if (!output.live) {
-    if (mode === "obs" || mode === "lower-third") {
+    if (mode === "obs") {
+      return <main className={cn("min-h-screen", transparent ? "bg-transparent" : "bg-[#07090f]")} />;
+    }
+
+    if (mode === "lower-third") {
       return <main className="min-h-screen bg-transparent" />;
     }
 
@@ -45,7 +50,7 @@ export function OutputFrame({ mode }: OutputFrameProps) {
   }
 
   if (output.blackout) {
-    return <main className={cn("min-h-screen", mode === "obs" ? "bg-transparent" : "bg-black")} />;
+    return <main className={cn("min-h-screen", mode === "obs" && transparent ? "bg-transparent" : "bg-black")} />;
   }
 
   if (mode === "agenda") {
@@ -85,7 +90,7 @@ export function OutputFrame({ mode }: OutputFrameProps) {
               titleClassName="text-xl uppercase text-white/70"
               bodyClassName="text-5xl font-semibold"
             />
-            {!output.hideTimer && <TimerDisplay timer={timer} nowMs={now} compact className="text-white" />}
+            {!output.hideTimer && <TimerDisplay timer={timer} nowMs={now} compact size="lower-third" className="text-white" />}
           </section>
         ) : (
           <section className="grid w-[70vw] grid-cols-[1fr_auto] items-center rounded-md bg-black/82 px-8 py-6">
@@ -93,7 +98,7 @@ export function OutputFrame({ mode }: OutputFrameProps) {
               <div className="text-xl uppercase text-white/70">{active?.speaker}</div>
               <div className="mt-2 text-5xl font-semibold">{active?.title}</div>
             </div>
-            {!output.hideTimer && <TimerDisplay timer={timer} nowMs={now} compact className="text-white" />}
+            {!output.hideTimer && <TimerDisplay timer={timer} nowMs={now} compact size="lower-third" className="text-white" />}
           </section>
         )}
       </main>
@@ -101,8 +106,6 @@ export function OutputFrame({ mode }: OutputFrameProps) {
   }
 
   if (isPresenterOutput) {
-    const transparent = mode === "obs";
-
     return (
       <main
         className={cn(
@@ -125,7 +128,7 @@ export function OutputFrame({ mode }: OutputFrameProps) {
               bodyClassName="text-[clamp(2rem,6vw,6.5rem)] font-bold"
             />
           )}
-          {!output.hideTimer && <TimerDisplay timer={timer} nowMs={now} />}
+          {!output.hideTimer && <TimerDisplay timer={timer} nowMs={now} size="output" />}
         </section>
       </main>
     );

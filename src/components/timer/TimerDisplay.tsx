@@ -10,6 +10,7 @@ type TimerDisplayProps = {
   nowMs: number;
   className?: string;
   compact?: boolean;
+  size?: "default" | "output" | "lower-third";
   onRemainingChange?: (remainingMs: number) => void;
 };
 
@@ -17,7 +18,14 @@ type DraftProgress = {
   elapsedMs: number;
 };
 
-export function TimerDisplay({ timer, nowMs, className, compact = false, onRemainingChange }: TimerDisplayProps) {
+export function TimerDisplay({
+  timer,
+  nowMs,
+  className,
+  compact = false,
+  size = "default",
+  onRemainingChange,
+}: TimerDisplayProps) {
   const timerColorSettings = useTempoCueStore((state) => state.timerColorSettings);
   const remainingMs = getRemainingMs(timer, nowMs);
   const showsProgress = timer.mode === "countdown" || timer.mode === "end-at-time";
@@ -31,6 +39,30 @@ export function TimerDisplay({ timer, nowMs, className, compact = false, onRemai
   const timerColor = getTimerColor(displayedRemainingMs, timer.mode, timerColorSettings);
   const progress = getTimerProgress(timer.durationMs, displayedRemainingMs);
   const colorStops = getTimerProgressColorStops(timer.durationMs, timerColorSettings);
+  const timerTextClassName =
+    size === "output"
+      ? "text-[clamp(6rem,26cqw,20rem)]"
+      : size === "lower-third"
+        ? "text-[clamp(5rem,12vw,10rem)]"
+        : compact
+          ? "text-6xl"
+          : "text-[clamp(4rem,20cqw,15rem)]";
+  const progressTrackClassName =
+    size === "output"
+      ? "h-10 w-full max-w-[82rem]"
+      : size === "lower-third"
+        ? "h-5 w-[clamp(18rem,26vw,34rem)]"
+        : compact
+          ? "h-4 w-72"
+          : "h-8 w-full max-w-[72rem]";
+  const progressHandleClassName =
+    size === "output"
+      ? "h-14 w-4 -translate-x-2 -translate-y-7"
+      : size === "lower-third"
+        ? "h-8 w-2.5 -translate-x-1 -translate-y-4"
+        : compact
+          ? "h-6 w-2 -translate-x-1 -translate-y-3"
+          : "h-12 w-3 -translate-x-1.5 -translate-y-6";
 
   useEffect(() => {
     if (!isScrubbingRef.current) {
@@ -73,7 +105,7 @@ export function TimerDisplay({ timer, nowMs, className, compact = false, onRemai
       <div
         className={cn(
           "max-w-full overflow-hidden text-center font-mono font-semibold tabular-nums leading-none tracking-normal",
-          compact ? "text-6xl" : "text-[clamp(4rem,20cqw,15rem)]",
+          timerTextClassName,
           !timerColor && "text-foreground",
         )}
         style={timerColor ? { color: timerColor } : undefined}
@@ -85,7 +117,7 @@ export function TimerDisplay({ timer, nowMs, className, compact = false, onRemai
         <div
           className={cn(
             "relative overflow-hidden bg-white/12 shadow-inner shadow-black/20",
-            compact ? "h-4 w-72" : "h-8 w-full max-w-[72rem]",
+            progressTrackClassName,
             canDragProgress && "cursor-ew-resize",
           )}
           role={canDragProgress ? undefined : "progressbar"}
@@ -99,7 +131,7 @@ export function TimerDisplay({ timer, nowMs, className, compact = false, onRemai
           <div
             className={cn(
               "absolute top-1/2 border border-white/80 bg-white shadow-[0_0_10px_rgba(255,255,255,0.75)] transition-[left] duration-100",
-              compact ? "h-6 w-2 -translate-x-1 -translate-y-3" : "h-12 w-3 -translate-x-1.5 -translate-y-6",
+              progressHandleClassName,
             )}
             style={{ left: `${progress}%` }}
           />
