@@ -11,7 +11,7 @@ import type {
   TimerState,
   TimerColorSettings,
 } from "../types/timer";
-import { createIdleTimer, DEFAULT_DURATION_MS, DEFAULT_TIMER_COLOR_SETTINGS, formatTimeInput, targetTimeToMs } from "../lib/timer";
+import { createIdleTimer, DEFAULT_DURATION_MS, DEFAULT_TIMER_COLOR_SETTINGS, formatTimeInput } from "../lib/timer";
 
 const fallbackHost = window.location.hostname || "localhost";
 const fallbackLocalUrls = {
@@ -92,8 +92,51 @@ type StoreState = Snapshot & {
 
 const canInvoke = "__TAURI_INTERNALS__" in window;
 let activeSocket: WebSocket | null = null;
+let pendingCommands: ClientCommand[] = [];
 
-export const useTempoCueStore = create<StoreState>((set, get) => ({
+type ClientCommand =
+  | { type: "timer/start" }
+  | { type: "timer/pause" }
+  | { type: "timer/reset" }
+  | { type: "timer/add-time"; payload: { deltaMs: number } }
+  | { type: "timer/set-duration"; payload: { durationMs: number } }
+  | { type: "timer/set-remaining"; payload: { remainingMs: number } }
+  | { type: "timer/set-end-time"; payload: { targetTime: string } }
+  | { type: "rundown/select-item"; payload: { itemId: string } }
+  | { type: "rundown/skip" }
+  | {
+      type: "rundown/create-item";
+      payload: {
+        title: string;
+        speaker: string;
+        durationMs: number;
+        timingMode: RundownTimingMode;
+        endTime: string | null;
+        notes: string;
+        supportingFiles: string[];
+      };
+    }
+  | {
+      type: "rundown/update-item";
+      payload: {
+        itemId: string;
+        title: string;
+        speaker: string;
+        durationMs: number;
+        timingMode: RundownTimingMode;
+        endTime: string | null;
+        notes: string;
+        supportingFiles: string[];
+      };
+    }
+  | { type: "rundown/delete-item"; payload: { itemId: string } }
+  | { type: "output/blackout"; payload: { enabled: boolean } }
+  | { type: "output/hide-timer"; payload: { enabled: boolean } }
+  | { type: "output/live"; payload: { enabled: boolean } }
+  | { type: "message/show"; payload: OutputMessage }
+  | { type: "message/hide" };
+
+export const useTempoCueStore = create<StoreState>((set) => ({
   timer: createIdleTimer(),
   rundown: fallbackRundown,
   output: fallbackOutput,
@@ -134,25 +177,7 @@ export const useTempoCueStore = create<StoreState>((set, get) => ({
       return;
     }
 
-    const newItem: RundownItem = {
-      id: crypto.randomUUID(),
-      title: item.title,
-      speaker: item.speaker,
-      notes: item.notes,
-      supportingFiles: item.supportingFiles,
-      durationMs: item.durationMs,
-      timingMode: item.timingMode,
-      endTime: item.endTime,
-      color: nextItemColor(get().rundown.length),
-      completed: false,
-    };
-    set((state) => ({
-      rundown: [...state.rundown, newItem],
-      timersByItem: {
-        ...state.timersByItem,
-        [state.output.activeItemId]: state.timer,
-      },
-    }));
+    return sendRemoteCommand({ type: "rundown/create-item", payload: item });
   },
 
   updateRundownItem: async (item) => {
@@ -170,182 +195,44 @@ export const useTempoCueStore = create<StoreState>((set, get) => ({
       return;
     }
 
-    set((state) => {
-      const nextItem = {
-        id: item.id,
-        title: item.title,
-        speaker: item.speaker,
-        durationMs: item.durationMs,
-        timingMode: item.timingMode,
-        endTime: item.endTime,
-        notes: item.notes,
-        supportingFiles: item.supportingFiles,
-      };
-      const nextTimer = createTimerForRundownItem(nextItem, Date.now() + state.clockOffsetMs);
-      const timer = item.id === state.output.activeItemId ? nextTimer : state.timer;
-      return {
-        rundown: state.rundown.map((rundownItem) =>
-          rundownItem.id === item.id
-            ? {
-                ...rundownItem,
-                title: item.title,
-                speaker: item.speaker,
-                durationMs: item.durationMs,
-                timingMode: item.timingMode,
-                endTime: item.endTime,
-                notes: item.notes,
-                supportingFiles: item.supportingFiles,
-              }
-            : rundownItem,
-        ),
-        timer,
-        timersByItem: {
-          ...state.timersByItem,
-          [item.id]: nextTimer,
-          ...(item.id === state.output.activeItemId ? { [item.id]: timer } : {}),
-        },
-      };
-    });
+    return sendRemoteCommand({ type: "rundown/update-item", payload: { ...item, itemId: item.id } });
   },
 
   deleteRundownItem: async (itemId: string) => {
     if (canInvoke) return invoke("delete_rundown_item", { itemId });
-    set((state) => {
-      if (state.rundown.length === 1) return {};
-
-      const index = state.rundown.findIndex((item) => item.id === itemId);
-      if (index === -1) return {};
-
-      const rundown = state.rundown.filter((item) => item.id !== itemId);
-      const timersByItem = { ...state.timersByItem };
-      delete timersByItem[itemId];
-
-      if (state.output.activeItemId !== itemId) {
-        return { rundown, timersByItem };
-      }
-
-      const next = rundown[Math.min(index, rundown.length - 1)];
-      const timer = timersByItem[next.id] ?? createTimerForRundownItem(next, Date.now() + state.clockOffsetMs);
-      return {
-        rundown,
-        output: { ...state.output, activeItemId: next.id },
-        timer,
-        timersByItem: { ...timersByItem, [next.id]: timer },
-      };
-    });
+    return sendRemoteCommand({ type: "rundown/delete-item", payload: { itemId } });
   },
 
   startTimer: async () => {
     if (canInvoke) return invoke("start_timer");
-    mutateLocalTimer(set, (timer) => {
-      const now = Date.now();
-      if (timer.status === "running") return timer;
-      if (timer.status === "paused" && timer.pausedAtMs) {
-        return {
-          ...timer,
-          status: "running",
-          mode: timer.mode === "end-at-time" ? "end-at-time" : timer.mode,
-          accumulatedPauseMs: timer.accumulatedPauseMs + now - timer.pausedAtMs,
-          pausedAtMs: null,
-          remainingAtPauseMs: null,
-          serverNowMs: now,
-        };
-      }
-      return {
-        ...timer,
-        status: "running",
-        mode: timer.mode === "end-at-time" ? "end-at-time" : timer.mode,
-        startedAtMs: now,
-        pausedAtMs: null,
-        accumulatedPauseMs: 0,
-        remainingAtPauseMs: null,
-        serverNowMs: now,
-      };
-    });
+    return sendRemoteCommand({ type: "timer/start" });
   },
 
   pauseTimer: async () => {
     if (canInvoke) return invoke("pause_timer");
-    mutateLocalTimer(set, (timer) => {
-      if (timer.status !== "running") return timer;
-      const now = Date.now();
-      const elapsed = now - (timer.startedAtMs ?? now) - timer.accumulatedPauseMs;
-      const remaining =
-        timer.mode === "end-at-time" && timer.targetEndAtMs !== null
-          ? timer.targetEndAtMs - now
-          : timer.mode === "countup"
-            ? elapsed
-            : timer.durationMs - elapsed;
-      return {
-        ...timer,
-        status: "paused",
-        pausedAtMs: now,
-        remainingAtPauseMs: remaining,
-        serverNowMs: now,
-      };
-    });
+    return sendRemoteCommand({ type: "timer/pause" });
   },
 
   resetTimer: async () => {
     if (canInvoke) return invoke("reset_timer");
-    const active = get().rundown.find((item) => item.id === get().output.activeItemId);
-    const timer = active ? createTimerForRundownItem(active, Date.now() + get().clockOffsetMs) : createIdleTimer(DEFAULT_DURATION_MS);
-    set((state) => ({
-      timer,
-      timersByItem: {
-        ...state.timersByItem,
-        [state.output.activeItemId]: timer,
-      },
-    }));
+    return sendRemoteCommand({ type: "timer/reset" });
   },
 
   addTime: async (deltaMs: number) => {
     if (canInvoke) return invoke("add_time", { deltaMs });
-    set((state) => {
-      const timer = {
-        ...state.timer,
-        durationMs: Math.max(0, state.timer.durationMs + deltaMs),
-        targetEndAtMs: state.timer.targetEndAtMs === null ? null : state.timer.targetEndAtMs + deltaMs,
-      };
-      const activeItem = state.rundown.find((item) => item.id === state.output.activeItemId);
-      const shouldUpdateEndTime =
-        activeItem?.timingMode === "end-time" &&
-        timer.mode === "end-at-time" &&
-        timer.targetEndAtMs !== null;
-
-      return {
-        timer,
-        rundown: shouldUpdateEndTime
-          ? state.rundown.map((item) =>
-              item.id === state.output.activeItemId
-                ? {
-                    ...item,
-                    durationMs: timer.durationMs,
-                    endTime: formatTimeInput(timer.targetEndAtMs ?? Date.now()),
-                  }
-                : item,
-            )
-          : state.rundown,
-        timersByItem: {
-          ...state.timersByItem,
-          [state.output.activeItemId]: timer,
-        },
-      };
-    });
+    return sendRemoteCommand({ type: "timer/add-time", payload: { deltaMs } });
   },
 
   setDuration: async (durationMs: number) => {
     if (canInvoke) return invoke("set_timer_duration", { durationMs });
-    mutateLocalTimer(set, (timer) => ({
-      ...timer,
-      mode: "countdown",
-      durationMs,
-      remainingAtPauseMs: durationMs,
-      targetEndAtMs: null,
-    }));
+    return sendRemoteCommand({ type: "timer/set-duration", payload: { durationMs } });
   },
 
   setRemaining: async (remainingMs: number) => {
+    if (!canInvoke) {
+      return sendRemoteCommand({ type: "timer/set-remaining", payload: { remainingMs } });
+    }
+
     set((state) => {
       const now = Date.now() + state.clockOffsetMs;
       const timer = setTimerRemaining(state.timer, remainingMs, now);
@@ -374,65 +261,37 @@ export const useTempoCueStore = create<StoreState>((set, get) => ({
         },
       };
     });
-    if (canInvoke) return invoke("set_timer_remaining", { remainingMs });
+    return invoke("set_timer_remaining", { remainingMs });
   },
 
   setEndAtTime: async (targetTime: string) => {
     if (canInvoke) return invoke("set_timer_end_time", { targetTime });
-    mutateLocalTimer(set, (timer) => {
-      const now = Date.now() + get().clockOffsetMs;
-      const targetEndAtMs = targetTimeToMs(targetTime, now);
-      if (targetEndAtMs === null) return timer;
-      const durationMs = Math.max(0, targetEndAtMs - now);
-      return {
-        ...timer,
-        mode: "end-at-time",
-        status: "running",
-        durationMs,
-        startedAtMs: now,
-        pausedAtMs: null,
-        accumulatedPauseMs: 0,
-        remainingAtPauseMs: null,
-        targetEndAtMs,
-        serverNowMs: now,
-      };
-    });
+    return sendRemoteCommand({ type: "timer/set-end-time", payload: { targetTime } });
   },
 
   selectRundownItem: async (itemId: string) => {
     if (canInvoke) return invoke("select_rundown_item", { itemId });
-    const active = get().rundown.find((item) => item.id === itemId);
-    set((state) => ({
-      output: { ...state.output, activeItemId: itemId },
-      timer: state.timersByItem[itemId] ?? (active ? createTimerForRundownItem(active, Date.now() + state.clockOffsetMs) : createIdleTimer(DEFAULT_DURATION_MS)),
-      timersByItem: {
-        ...state.timersByItem,
-        [state.output.activeItemId]: state.timer,
-      },
-    }));
+    return sendRemoteCommand({ type: "rundown/select-item", payload: { itemId } });
   },
 
   skipTimer: async () => {
     if (canInvoke) return invoke("skip_timer");
-    const { rundown, output } = get();
-    const index = rundown.findIndex((item) => item.id === output.activeItemId);
-    const next = rundown[Math.min(index + 1, rundown.length - 1)];
-    if (next) await get().selectRundownItem(next.id);
+    return sendRemoteCommand({ type: "rundown/skip" });
   },
 
   setBlackout: async (enabled: boolean) => {
     if (canInvoke) return invoke("set_blackout", { enabled });
-    set((state) => ({ output: { ...state.output, blackout: enabled } }));
+    return sendRemoteCommand({ type: "output/blackout", payload: { enabled } });
   },
 
   setHideTimer: async (enabled: boolean) => {
     if (canInvoke) return invoke("set_hide_timer", { enabled });
-    set((state) => ({ output: { ...state.output, hideTimer: enabled } }));
+    return sendRemoteCommand({ type: "output/hide-timer", payload: { enabled } });
   },
 
   setLive: async (enabled: boolean) => {
     if (canInvoke) return invoke("set_live", { enabled });
-    set((state) => ({ output: { ...state.output, live: enabled } }));
+    return sendRemoteCommand({ type: "output/live", payload: { enabled } });
   },
 
   setTimerColorSettings: (settings) => {
@@ -443,12 +302,12 @@ export const useTempoCueStore = create<StoreState>((set, get) => ({
 
   showMessage: async (message: OutputMessage) => {
     if (canInvoke) return invoke("show_message", { message });
-    set((state) => ({ output: { ...state.output, message } }));
+    return sendRemoteCommand({ type: "message/show", payload: message });
   },
 
   hideMessage: async () => {
     if (canInvoke) return invoke("hide_message");
-    set((state) => ({ output: { ...state.output, message: null } }));
+    return sendRemoteCommand({ type: "message/hide" });
   },
 }));
 
@@ -495,7 +354,10 @@ function connectWebSocket(port: number, set: (state: Partial<StoreState> | ((sta
   const host = window.location.hostname || "127.0.0.1";
   const socket = new WebSocket(`ws://${host}:${port}/ws`);
   activeSocket = socket;
-  socket.onopen = () => set({ connected: true });
+  socket.onopen = () => {
+    set({ connected: true });
+    flushPendingCommands(socket);
+  };
   socket.onclose = () => {
     if (activeSocket === socket) activeSocket = null;
     set({ connected: false });
@@ -506,23 +368,30 @@ function connectWebSocket(port: number, set: (state: Partial<StoreState> | ((sta
   };
 }
 
+function sendRemoteCommand(command: ClientCommand) {
+  if (activeSocket?.readyState === WebSocket.OPEN) {
+    activeSocket.send(JSON.stringify(command));
+    return Promise.resolve();
+  }
+
+  pendingCommands.push(command);
+  return Promise.resolve();
+}
+
+function flushPendingCommands(socket: WebSocket) {
+  if (socket.readyState !== WebSocket.OPEN || pendingCommands.length === 0) return;
+
+  const commands = pendingCommands;
+  pendingCommands = [];
+  for (const command of commands) {
+    socket.send(JSON.stringify(command));
+  }
+}
+
 function resolveRealtimePort() {
   const port = Number(window.location.port);
   if (!Number.isFinite(port) || port === 0 || port === 1420) return 4310;
   return port;
-}
-
-function mutateLocalTimer(set: (state: Partial<StoreState> | ((state: StoreState) => Partial<StoreState>)) => void, updater: (timer: TimerState) => TimerState) {
-  set((state) => {
-    const timer = updater(state.timer);
-    return {
-      timer,
-      timersByItem: {
-        ...state.timersByItem,
-        [state.output.activeItemId]: timer,
-      },
-    };
-  });
 }
 
 function setTimerRemaining(timer: TimerState, remainingMs: number, now: number): TimerState {
@@ -560,35 +429,6 @@ function setTimerRemaining(timer: TimerState, remainingMs: number, now: number):
     remainingAtPauseMs: remaining,
     serverNowMs: now,
   };
-}
-
-function createTimerForRundownItem(
-  item: Pick<RundownItem, "durationMs" | "timingMode" | "endTime">,
-  now: number,
-): TimerState {
-  const timer = createIdleTimer(item.durationMs);
-  if (item.timingMode !== "end-time" || !item.endTime) return timer;
-
-  const targetEndAtMs = targetTimeToMs(item.endTime, now);
-  if (targetEndAtMs === null) return timer;
-
-  return {
-    ...timer,
-    mode: "end-at-time",
-    status: "idle",
-    durationMs: Math.max(0, targetEndAtMs - now),
-    startedAtMs: null,
-    pausedAtMs: null,
-    accumulatedPauseMs: 0,
-    remainingAtPauseMs: null,
-    targetEndAtMs,
-    serverNowMs: now,
-  };
-}
-
-function nextItemColor(index: number) {
-  const colors = ["#3ddc97", "#f5c542", "#5cc8ff", "#ff7a59", "#b48cff", "#f25f8c"];
-  return colors[index % colors.length];
 }
 
 function readTimerColorSettings() {

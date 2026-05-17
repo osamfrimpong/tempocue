@@ -10,6 +10,7 @@ use axum::{
 };
 use futures_util::{SinkExt, StreamExt};
 use rust_embed::RustEmbed;
+use serde::Deserialize;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
     path::Path as FsPath,
@@ -18,7 +19,7 @@ use tokio::net::TcpListener;
 use tokio::time::{interval, Duration};
 use tower_http::cors::CorsLayer;
 
-use crate::state::{AppState, RealtimeEvent};
+use crate::state::{AppState, OutputMessage, RealtimeEvent, RundownTimingMode};
 
 pub async fn start_output_server(state: AppState, app: tauri::AppHandle) -> Result<(), String> {
     let network_host = local_network_ipv4().map(|ip| ip.to_string());
@@ -95,11 +96,14 @@ async fn index_handler(State(context): State<ServerContext>) -> Response {
 }
 
 async fn asset_or_index_handler(Path(path): Path<String>, State(context): State<ServerContext>) -> Response {
-    if !context.state.is_live().await {
-        return inactive_response();
-    }
     if path.starts_with("assets/") {
         return serve_asset(&path);
+    }
+    if is_controller_path(&path) {
+        return serve_index();
+    }
+    if !context.state.is_live().await {
+        return inactive_response();
     }
     serve_index()
 }
@@ -253,8 +257,14 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 
     let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(message)) = receiver.next().await {
-            if matches!(message, Message::Close(_)) {
-                break;
+            match message {
+                Message::Text(payload) => {
+                    if let Ok(command) = serde_json::from_str::<ClientCommand>(&payload) {
+                        apply_client_command(&state, command).await;
+                    }
+                }
+                Message::Close(_) => break,
+                _ => {}
             }
         }
     });
@@ -263,6 +273,205 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         _ = &mut send_task => recv_task.abort(),
         _ = &mut recv_task => send_task.abort(),
     }
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", content = "payload")]
+enum ClientCommand {
+    #[serde(rename = "timer/start")]
+    StartTimer,
+    #[serde(rename = "timer/pause")]
+    PauseTimer,
+    #[serde(rename = "timer/reset")]
+    ResetTimer,
+    #[serde(rename = "timer/add-time")]
+    AddTime {
+        #[serde(rename = "deltaMs")]
+        delta_ms: i64,
+    },
+    #[serde(rename = "timer/set-duration")]
+    SetDuration {
+        #[serde(rename = "durationMs")]
+        duration_ms: i64,
+    },
+    #[serde(rename = "timer/set-remaining")]
+    SetRemaining {
+        #[serde(rename = "remainingMs")]
+        remaining_ms: i64,
+    },
+    #[serde(rename = "timer/set-end-time")]
+    SetEndTime {
+        #[serde(rename = "targetTime")]
+        target_time: String,
+    },
+    #[serde(rename = "rundown/select-item")]
+    SelectItem {
+        #[serde(rename = "itemId")]
+        item_id: String,
+    },
+    #[serde(rename = "rundown/skip")]
+    SkipTimer,
+    #[serde(rename = "rundown/create-item")]
+    CreateItem {
+        title: String,
+        speaker: String,
+        #[serde(rename = "durationMs")]
+        duration_ms: i64,
+        #[serde(rename = "timingMode")]
+        timing_mode: RundownTimingMode,
+        #[serde(rename = "endTime")]
+        end_time: Option<String>,
+        notes: String,
+        #[serde(rename = "supportingFiles")]
+        supporting_files: Vec<String>,
+    },
+    #[serde(rename = "rundown/update-item")]
+    UpdateItem {
+        #[serde(rename = "itemId")]
+        item_id: String,
+        title: String,
+        speaker: String,
+        #[serde(rename = "durationMs")]
+        duration_ms: i64,
+        #[serde(rename = "timingMode")]
+        timing_mode: RundownTimingMode,
+        #[serde(rename = "endTime")]
+        end_time: Option<String>,
+        notes: String,
+        #[serde(rename = "supportingFiles")]
+        supporting_files: Vec<String>,
+    },
+    #[serde(rename = "rundown/delete-item")]
+    DeleteItem {
+        #[serde(rename = "itemId")]
+        item_id: String,
+    },
+    #[serde(rename = "output/blackout")]
+    SetBlackout { enabled: bool },
+    #[serde(rename = "output/hide-timer")]
+    SetHideTimer { enabled: bool },
+    #[serde(rename = "output/live")]
+    SetLive { enabled: bool },
+    #[serde(rename = "message/show")]
+    ShowMessage(OutputMessage),
+    #[serde(rename = "message/hide")]
+    HideMessage,
+}
+
+async fn apply_client_command(state: &AppState, command: ClientCommand) {
+    match command {
+        ClientCommand::StartTimer => {
+            state.update_timer(|timer| timer.start()).await;
+        }
+        ClientCommand::PauseTimer => {
+            state.update_timer(|timer| timer.pause()).await;
+        }
+        ClientCommand::ResetTimer => {
+            state.update_timer(|timer| timer.reset()).await;
+        }
+        ClientCommand::AddTime { delta_ms } => {
+            state.add_time(delta_ms).await;
+        }
+        ClientCommand::SetDuration { duration_ms } => {
+            state.update_timer(|timer| timer.set_duration(duration_ms)).await;
+        }
+        ClientCommand::SetRemaining { remaining_ms } => {
+            state.set_remaining(remaining_ms).await;
+        }
+        ClientCommand::SetEndTime { target_time } => {
+            state
+                .update_timer(|timer| {
+                    let _ = timer.set_end_at_time(&target_time);
+                })
+                .await;
+        }
+        ClientCommand::SelectItem { item_id } => {
+            state.select_item(item_id).await;
+        }
+        ClientCommand::SkipTimer => {
+            state.skip_item().await;
+        }
+        ClientCommand::CreateItem {
+            title,
+            speaker,
+            duration_ms,
+            timing_mode,
+            end_time,
+            notes,
+            supporting_files,
+        } => {
+            let title = title.trim().to_string();
+            if !title.is_empty() {
+                state
+                    .create_item(
+                        title,
+                        speaker.trim().to_string(),
+                        duration_ms,
+                        timing_mode,
+                        end_time,
+                        notes.trim().to_string(),
+                        clean_supporting_files(supporting_files),
+                    )
+                    .await;
+            }
+        }
+        ClientCommand::UpdateItem {
+            item_id,
+            title,
+            speaker,
+            duration_ms,
+            timing_mode,
+            end_time,
+            notes,
+            supporting_files,
+        } => {
+            let title = title.trim().to_string();
+            if !title.is_empty() {
+                state
+                    .update_item(
+                        item_id,
+                        title,
+                        speaker.trim().to_string(),
+                        duration_ms,
+                        timing_mode,
+                        end_time,
+                        notes.trim().to_string(),
+                        clean_supporting_files(supporting_files),
+                    )
+                    .await;
+            }
+        }
+        ClientCommand::DeleteItem { item_id } => {
+            state.delete_item(item_id).await;
+        }
+        ClientCommand::SetBlackout { enabled } => {
+            state.set_blackout(enabled).await;
+        }
+        ClientCommand::SetHideTimer { enabled } => {
+            state.set_hide_timer(enabled).await;
+        }
+        ClientCommand::SetLive { enabled } => {
+            state.set_live(enabled).await;
+        }
+        ClientCommand::ShowMessage(message) => {
+            state.show_message(message).await;
+        }
+        ClientCommand::HideMessage => {
+            state.hide_message().await;
+        }
+    }
+}
+
+fn clean_supporting_files(files: Vec<String>) -> Vec<String> {
+    files
+        .into_iter()
+        .map(|file| file.trim().to_string())
+        .filter(|file| !file.is_empty())
+        .collect()
+}
+
+fn is_controller_path(path: &str) -> bool {
+    matches!(path, "control" | "settings")
 }
 
 fn dev_index_html() -> String {
