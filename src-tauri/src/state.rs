@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 
-use crate::timer::{TimerState, DEFAULT_DURATION_MS};
+use crate::timer::{TimerState, TimerStatus, DEFAULT_DURATION_MS};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -17,6 +17,7 @@ pub struct Snapshot {
     pub timer: TimerState,
     pub rundown: Vec<RundownItem>,
     pub output: OutputState,
+    pub message_draft: OutputMessageDraft,
     pub urls: ServerUrls,
 }
 
@@ -86,6 +87,14 @@ pub struct OutputMessageFormatting {
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct OutputMessageDraft {
+    pub title: String,
+    pub body: String,
+    pub formatting: OutputMessageFormatting,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OutputMessageTextStyle {
     pub bold: bool,
     pub italic: bool,
@@ -132,6 +141,8 @@ pub enum RealtimeEvent {
     RundownItems(Vec<RundownItem>),
     #[serde(rename = "message/show")]
     MessageShow(OutputMessage),
+    #[serde(rename = "message/draft")]
+    MessageDraft(OutputMessageDraft),
     #[serde(rename = "message/hide")]
     MessageHide { id: String },
     #[serde(rename = "output/blackout")]
@@ -147,6 +158,7 @@ struct InnerState {
     timers_by_item: HashMap<String, TimerState>,
     rundown: Vec<RundownItem>,
     output: OutputState,
+    message_draft: OutputMessageDraft,
     urls: ServerUrls,
 }
 
@@ -177,6 +189,7 @@ impl Default for AppState {
                     message: None,
                     active_item_id,
                 },
+                message_draft: default_message_draft(),
                 urls: urls_for_host_port(None, 4310),
             })),
             tx,
@@ -197,6 +210,7 @@ impl AppState {
             timer,
             rundown: state.rundown.clone(),
             output: state.output.clone(),
+            message_draft: state.message_draft.clone(),
             urls: state.urls.clone(),
         }
     }
@@ -211,6 +225,7 @@ impl AppState {
                 timer,
                 rundown: state.rundown.clone(),
                 output: state.output.clone(),
+                message_draft: state.message_draft.clone(),
                 urls: state.urls.clone(),
             }
         };
@@ -309,7 +324,9 @@ impl AppState {
                 timer.touch_server_now();
                 state.timer = timer.clone();
                 state.timers_by_item.insert(item_id.clone(), timer.clone());
-                timer
+                Some(timer)
+            } else if state.timer.status == TimerStatus::Running {
+                None
             } else {
                 let previous_item_id = state.output.active_item_id.clone();
                 let previous_timer = state.timer.clone();
@@ -337,8 +354,11 @@ impl AppState {
                 state.output.active_item_id = item_id.clone();
                 state.timer = next_timer.clone();
                 state.timers_by_item.insert(item_id.clone(), next_timer.clone());
-                next_timer
+                Some(next_timer)
             }
+        };
+        let Some(timer) = timer else {
+            return;
         };
         self.broadcast(RealtimeEvent::ActiveItem { item_id });
         self.broadcast(RealtimeEvent::TimerState(timer));
@@ -395,6 +415,9 @@ impl AppState {
             let Some(index) = state.rundown.iter().position(|item| item.id == item_id) else {
                 return None;
             };
+            if state.output.active_item_id == item_id && state.timer.status == TimerStatus::Running {
+                return None;
+            }
 
             state.rundown[index].title = title;
             state.rundown[index].speaker = speaker;
@@ -437,6 +460,10 @@ impl AppState {
             }
 
             let was_active = state.output.active_item_id == item_id;
+            if was_active && state.timer.status == TimerStatus::Running {
+                return false;
+            }
+
             state.rundown.remove(index);
             state.timers_by_item.remove(&item_id);
 
@@ -528,6 +555,14 @@ impl AppState {
         self.broadcast(RealtimeEvent::MessageShow(message));
     }
 
+    pub async fn update_message_draft(&self, draft: OutputMessageDraft) {
+        {
+            let mut state = self.inner.write().await;
+            state.message_draft = draft.clone();
+        }
+        self.broadcast(RealtimeEvent::MessageDraft(draft));
+    }
+
     pub async fn hide_message(&self) {
         let id = {
             let mut state = self.inner.write().await;
@@ -554,6 +589,25 @@ impl AppState {
 fn next_item_color(index: usize) -> String {
     const COLORS: [&str; 6] = ["#3ddc97", "#f5c542", "#5cc8ff", "#ff7a59", "#b48cff", "#f25f8c"];
     COLORS[index % COLORS.len()].to_string()
+}
+
+fn default_message_draft() -> OutputMessageDraft {
+    OutputMessageDraft {
+        title: "Next".to_string(),
+        body: "Please welcome the next speaker".to_string(),
+        formatting: OutputMessageFormatting {
+            title: OutputMessageTextStyle {
+                bold: false,
+                italic: false,
+                color: "#ffffff".to_string(),
+            },
+            body: OutputMessageTextStyle {
+                bold: true,
+                italic: false,
+                color: "#ffffff".to_string(),
+            },
+        },
+    }
 }
 
 fn timer_for_rundown_item(item: &RundownItem) -> TimerState {

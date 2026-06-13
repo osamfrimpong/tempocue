@@ -52,6 +52,7 @@ export function Controller() {
   const timer = useTempoCueStore((state) => state.timer);
   const rundown = useTempoCueStore((state) => state.rundown);
   const output = useTempoCueStore((state) => state.output);
+  const messageDraft = useTempoCueStore((state) => state.messageDraft);
   const urls = useTempoCueStore((state) => state.urls);
   const connected = useTempoCueStore((state) => state.connected);
   const clockOffsetMs = useTempoCueStore((state) => state.clockOffsetMs);
@@ -68,15 +69,10 @@ export function Controller() {
   const setBlackout = useTempoCueStore((state) => state.setBlackout);
   const setHideTimer = useTempoCueStore((state) => state.setHideTimer);
   const setLive = useTempoCueStore((state) => state.setLive);
+  const updateMessageDraft = useTempoCueStore((state) => state.updateMessageDraft);
   const showMessage = useTempoCueStore((state) => state.showMessage);
   const hideMessage = useTempoCueStore((state) => state.hideMessage);
   const now = useTicker(100) + clockOffsetMs;
-  const [messageTitle, setMessageTitle] = useState("Next");
-  const [messageBody, setMessageBody] = useState("Please welcome the next speaker");
-  const [messageFormatting, setMessageFormatting] = useState({
-    title: { bold: false, italic: false, color: "#ffffff" },
-    body: { bold: true, italic: false, color: "#ffffff" },
-  });
   const [newTitle, setNewTitle] = useState("");
   const [newDuration, setNewDuration] = useState("10:00");
   const [newEndTime, setNewEndTime] = useState(formatTimeInput(now));
@@ -112,7 +108,7 @@ export function Controller() {
   );
   const active = rundown[activeIndex] ?? rundown[0];
   const next = rundown[activeIndex + 1];
-  const rundownItemActionsDisabled = timer.status === "running";
+  const timerIsRunning = timer.status === "running";
   const isLive = output.live;
   const outputStatusLabel = !isLive ? "Output inactive" : output.blackout ? "Blackout" : "Output active";
   const controllerTimerLabel = active?.timingMode === "end-time" ? "End at" : "Duration";
@@ -140,9 +136,9 @@ export function Controller() {
     const message: OutputMessage = {
       id: crypto.randomUUID(),
       type: "lower-third",
-      title: messageTitle,
-      body: messageBody,
-      formatting: messageFormatting,
+      title: messageDraft.title,
+      body: messageDraft.body,
+      formatting: messageDraft.formatting,
       flashing: false,
       visible: true,
       target: "all",
@@ -156,7 +152,10 @@ export function Controller() {
   };
 
   const updateMessageStyle = (part: MessageStylePart, updater: (style: OutputMessageTextStyle) => OutputMessageTextStyle) => {
-    setMessageFormatting((current) => ({ ...current, [part]: updater(current[part]) }));
+    void updateMessageDraft({
+      ...messageDraft,
+      formatting: { ...messageDraft.formatting, [part]: updater(messageDraft.formatting[part]) },
+    });
   };
 
   const closeItemDialog = () => {
@@ -278,46 +277,56 @@ export function Controller() {
             </div>
           </div>
           <div className="grid max-h-80 min-h-0 flex-1 content-start gap-2 overflow-y-auto p-3 lg:max-h-none">
-            {rundown.map((item, index) => (
-              <div
-                key={item.id}
-                className={`grid grid-cols-[6px_1fr_auto] items-center gap-3 rounded-md border p-3 transition-colors ${
-                  item.id === output.activeItemId
-                    ? "border-primary bg-primary/10"
-                    : "border-border bg-background hover:bg-accent"
-                }`}
-              >
-                <span className="h-full min-h-14 rounded-full" style={{ backgroundColor: item.color }} />
-                <button className="min-w-0 text-left" onClick={() => void selectRundownItem(item.id)}>
-                  <span className="block text-sm text-muted-foreground">{String(index + 1).padStart(2, "0")}</span>
-                  <span className="block truncate font-medium">{item.title}</span>
-                  <span className="block truncate text-sm text-muted-foreground">{item.speaker}</span>
-                </button>
-                <div className="grid justify-items-end gap-2">
-                  <span className="font-mono text-sm tabular-nums">{Math.round(item.durationMs / 60000)}m</span>
-                  <div className="flex gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Edit ${item.title}`}
-                      disabled={rundownItemActionsDisabled}
-                      onClick={() => openEditDialog(item)}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Delete ${item.title}`}
-                      disabled={rundownItemActionsDisabled || rundown.length === 1}
-                      onClick={() => setDeleteCandidate(item)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+            {rundown.map((item, index) => {
+              const isActiveItem = item.id === output.activeItemId;
+              const itemSelectionDisabled = timerIsRunning && !isActiveItem;
+              const activeItemActionDisabled = timerIsRunning && isActiveItem;
+
+              return (
+                <div
+                  key={item.id}
+                  className={`grid grid-cols-[6px_1fr_auto] items-center gap-3 rounded-md border p-3 transition-colors ${
+                    isActiveItem ? "border-primary bg-primary/10" : "border-border bg-background hover:bg-accent"
+                  }`}
+                >
+                  <span className="h-full min-h-14 rounded-full" style={{ backgroundColor: item.color }} />
+                  <button
+                    className={`min-w-0 text-left ${
+                      itemSelectionDisabled ? "cursor-not-allowed text-muted-foreground/70" : ""
+                    }`}
+                    disabled={itemSelectionDisabled}
+                    onClick={() => void selectRundownItem(item.id)}
+                  >
+                    <span className="block text-sm text-muted-foreground">{String(index + 1).padStart(2, "0")}</span>
+                    <span className="block truncate font-medium">{item.title}</span>
+                    <span className="block truncate text-sm text-muted-foreground">{item.speaker}</span>
+                  </button>
+                  <div className="grid justify-items-end gap-2">
+                    <span className="font-mono text-sm tabular-nums">{Math.round(item.durationMs / 60000)}m</span>
+                    <div className="flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Edit ${item.title}`}
+                        disabled={activeItemActionDisabled}
+                        onClick={() => openEditDialog(item)}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Delete ${item.title}`}
+                        disabled={activeItemActionDisabled || rundown.length === 1}
+                        onClick={() => setDeleteCandidate(item)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
 
@@ -389,7 +398,12 @@ export function Controller() {
                   <RotateCcw className="h-4 w-4" />
                   Reset
                 </Button>
-                <Button className="min-w-0 px-3 sm:px-4" variant="secondary" onClick={() => void skipTimer()}>
+                <Button
+                  className="min-w-0 px-3 sm:px-4"
+                  variant="secondary"
+                  disabled={timerIsRunning}
+                  onClick={() => void skipTimer()}
+                >
                   <SkipForward className="h-4 w-4" />
                   Next
                 </Button>
@@ -432,16 +446,24 @@ export function Controller() {
               Messages
             </div>
             <div className="grid gap-3">
-              <Input aria-label="Message title" value={messageTitle} onChange={(event) => setMessageTitle(event.target.value)} />
+              <Input
+                aria-label="Message title"
+                value={messageDraft.title}
+                onChange={(event) => void updateMessageDraft({ ...messageDraft, title: event.target.value })}
+              />
               <MessageFormatControls
                 label="Title style"
-                style={messageFormatting.title}
+                style={messageDraft.formatting.title}
                 onChange={(updater) => updateMessageStyle("title", updater)}
               />
-              <Textarea aria-label="Message body" value={messageBody} onChange={(event) => setMessageBody(event.target.value)} />
+              <Textarea
+                aria-label="Message body"
+                value={messageDraft.body}
+                onChange={(event) => void updateMessageDraft({ ...messageDraft, body: event.target.value })}
+              />
               <MessageFormatControls
                 label="Body style"
-                style={messageFormatting.body}
+                style={messageDraft.formatting.body}
                 onChange={(updater) => updateMessageStyle("body", updater)}
               />
               <div className="grid grid-cols-3 gap-2 sm:flex">

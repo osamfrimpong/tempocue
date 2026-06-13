@@ -41,25 +41,25 @@ export function TimerDisplay({
   const colorStops = getTimerProgressColorStops(timer.durationMs, timerColorSettings);
   const timerTextClassName =
     size === "output"
-      ? "text-[clamp(6rem,26cqw,20rem)]"
+      ? "text-[clamp(8rem,32cqw,26rem)]"
       : size === "lower-third"
-        ? "text-[clamp(5rem,12vw,10rem)]"
+        ? "text-[clamp(6rem,14vw,12rem)]"
         : compact
           ? "text-6xl"
           : "text-[clamp(4rem,20cqw,15rem)]";
   const progressTrackClassName =
     size === "output"
-      ? "h-10 w-full max-w-[82rem]"
+      ? "h-12 w-full max-w-[92rem]"
       : size === "lower-third"
-        ? "h-5 w-[clamp(18rem,26vw,34rem)]"
+        ? "h-6 w-[clamp(22rem,32vw,42rem)]"
         : compact
           ? "h-4 w-72"
           : "h-8 w-full max-w-[72rem]";
   const progressHandleClassName =
     size === "output"
-      ? "h-14 w-4 -translate-x-2 -translate-y-7"
+      ? "h-16 w-5 -translate-x-2.5 -translate-y-8"
       : size === "lower-third"
-        ? "h-8 w-2.5 -translate-x-1 -translate-y-4"
+        ? "h-10 w-3 -translate-x-1.5 -translate-y-5"
         : compact
           ? "h-6 w-2 -translate-x-1 -translate-y-3"
           : "h-12 w-3 -translate-x-1.5 -translate-y-6";

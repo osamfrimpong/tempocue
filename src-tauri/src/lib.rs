@@ -6,7 +6,7 @@ mod timer;
 use commands::{
     add_time, delete_rundown_item, get_snapshot, hide_message, pause_timer, reset_timer, select_rundown_item,
     set_blackout, set_hide_timer, set_live, set_timer_duration, set_timer_end_time, set_timer_remaining, show_message, skip_timer,
-    start_timer, create_rundown_item, update_rundown_item,
+    start_timer, create_rundown_item, update_message_draft, update_rundown_item,
 };
 use server::start_output_server;
 use state::AppState;
@@ -58,6 +58,7 @@ pub fn run() {
             set_blackout,
             set_hide_timer,
             set_live,
+            update_message_draft,
             show_message,
             hide_message
         ])

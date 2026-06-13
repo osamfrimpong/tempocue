@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import type {
   OutputMessage,
+  OutputMessageDraft,
   OutputState,
   RealtimeEvent,
   RundownTimingMode,
@@ -62,6 +63,15 @@ const fallbackOutput: OutputState = {
   activeItemId: "opening",
 };
 
+const fallbackMessageDraft: OutputMessageDraft = {
+  title: "Next",
+  body: "Please welcome the next speaker",
+  formatting: {
+    title: { bold: false, italic: false, color: "#ffffff" },
+    body: { bold: true, italic: false, color: "#ffffff" },
+  },
+};
+
 const timerColorSettingsKey = "tempocue.timerColorSettings";
 
 type StoreState = Snapshot & {
@@ -86,6 +96,7 @@ type StoreState = Snapshot & {
   setHideTimer: (enabled: boolean) => Promise<void>;
   setLive: (enabled: boolean) => Promise<void>;
   setTimerColorSettings: (settings: TimerColorSettings) => void;
+  updateMessageDraft: (draft: OutputMessageDraft) => Promise<void>;
   showMessage: (message: OutputMessage) => Promise<void>;
   hideMessage: () => Promise<void>;
 };
@@ -133,6 +144,7 @@ type ClientCommand =
   | { type: "output/blackout"; payload: { enabled: boolean } }
   | { type: "output/hide-timer"; payload: { enabled: boolean } }
   | { type: "output/live"; payload: { enabled: boolean } }
+  | { type: "message/draft"; payload: OutputMessageDraft }
   | { type: "message/show"; payload: OutputMessage }
   | { type: "message/hide" };
 
@@ -140,6 +152,7 @@ export const useTempoCueStore = create<StoreState>((set) => ({
   timer: createIdleTimer(),
   rundown: fallbackRundown,
   output: fallbackOutput,
+  messageDraft: fallbackMessageDraft,
   urls: fallbackUrls,
   connected: false,
   clockOffsetMs: 0,
@@ -300,12 +313,21 @@ export const useTempoCueStore = create<StoreState>((set) => ({
     set({ timerColorSettings });
   },
 
+  updateMessageDraft: async (draft: OutputMessageDraft) => {
+    const messageDraft = normalizeMessageDraft(draft);
+    set({ messageDraft });
+    if (canInvoke) return invoke("update_message_draft", { draft: messageDraft });
+    return sendRemoteCommand({ type: "message/draft", payload: messageDraft });
+  },
+
   showMessage: async (message: OutputMessage) => {
+    set((state) => ({ output: { ...state.output, message } }));
     if (canInvoke) return invoke("show_message", { message });
     return sendRemoteCommand({ type: "message/show", payload: message });
   },
 
   hideMessage: async () => {
+    set((state) => ({ output: { ...state.output, message: null } }));
     if (canInvoke) return invoke("hide_message");
     return sendRemoteCommand({ type: "message/hide" });
   },
@@ -314,6 +336,7 @@ export const useTempoCueStore = create<StoreState>((set) => ({
 function applySnapshot(snapshot: Snapshot, set: (state: Partial<StoreState>) => void) {
   set({
     ...snapshot,
+    messageDraft: normalizeMessageDraft(snapshot.messageDraft ?? fallbackMessageDraft),
     connected: true,
     clockOffsetMs: snapshot.timer.serverNowMs - Date.now(),
   });
@@ -342,6 +365,7 @@ function applyRealtimeEvent(event: RealtimeEvent, set: (state: Partial<StoreStat
     set((state) => ({ output: { ...state.output, activeItemId: event.payload.itemId } }));
   }
   if (event.type === "message/show") set((state) => ({ output: { ...state.output, message: event.payload } }));
+  if (event.type === "message/draft") set({ messageDraft: normalizeMessageDraft(event.payload) });
   if (event.type === "message/hide") set((state) => ({ output: { ...state.output, message: null } }));
   if (event.type === "output/blackout") set((state) => ({ output: { ...state.output, blackout: event.payload.enabled } }));
   if (event.type === "output/hide-timer") set((state) => ({ output: { ...state.output, hideTimer: event.payload.enabled } }));
@@ -392,6 +416,28 @@ function resolveRealtimePort() {
   const port = Number(window.location.port);
   if (!Number.isFinite(port) || port === 0 || port === 1420) return 4310;
   return port;
+}
+
+function normalizeMessageDraft(draft: OutputMessageDraft): OutputMessageDraft {
+  return {
+    title: draft.title,
+    body: draft.body,
+    formatting: {
+      title: normalizeMessageTextStyle(draft.formatting?.title, fallbackMessageDraft.formatting.title),
+      body: normalizeMessageTextStyle(draft.formatting?.body, fallbackMessageDraft.formatting.body),
+    },
+  };
+}
+
+function normalizeMessageTextStyle(
+  style: Partial<OutputMessageDraft["formatting"]["title"]> | undefined,
+  fallback: OutputMessageDraft["formatting"]["title"],
+) {
+  return {
+    bold: Boolean(style?.bold),
+    italic: Boolean(style?.italic),
+    color: typeof style?.color === "string" && style.color ? style.color : fallback.color,
+  };
 }
 
 function setTimerRemaining(timer: TimerState, remainingMs: number, now: number): TimerState {

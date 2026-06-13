@@ -222,7 +222,7 @@ impl TimerState {
                 return self.remaining_at_pause_ms.unwrap_or(self.duration_ms);
             }
             if let Some(target_end_at_ms) = self.target_end_at_ms {
-                return target_end_at_ms - now;
+                return (target_end_at_ms - now).max(0);
             }
         }
         if self.status == TimerStatus::Paused {
@@ -234,7 +234,7 @@ impl TimerState {
         let elapsed = now - started_at_ms - self.accumulated_pause_ms;
         match self.mode {
             TimerMode::Countup => elapsed,
-            _ => self.duration_ms - elapsed,
+            _ => (self.duration_ms - elapsed).max(0),
         }
     }
 }
@@ -296,5 +296,37 @@ mod tests {
         timer.target_end_at_ms = Some(now_ms() + 60 * 60 * 1000);
 
         assert_eq!(timer.remaining_ms(now_ms() + 30 * 1000), timer.duration_ms);
+    }
+
+    #[test]
+    fn countdown_remaining_stops_at_zero() {
+        let now = now_ms();
+        let mut timer = TimerState::new(10 * 1000);
+        timer.status = TimerStatus::Running;
+        timer.started_at_ms = Some(now - 15 * 1000);
+
+        assert_eq!(timer.remaining_ms(now), 0);
+    }
+
+    #[test]
+    fn end_at_time_remaining_stops_at_zero() {
+        let now = now_ms();
+        let mut timer = TimerState::new(10 * 1000);
+        timer.mode = TimerMode::EndAtTime;
+        timer.status = TimerStatus::Running;
+        timer.target_end_at_ms = Some(now - 5 * 1000);
+
+        assert_eq!(timer.remaining_ms(now), 0);
+    }
+
+    #[test]
+    fn countup_can_continue_past_duration() {
+        let now = now_ms();
+        let mut timer = TimerState::new(10 * 1000);
+        timer.mode = TimerMode::Countup;
+        timer.status = TimerStatus::Running;
+        timer.started_at_ms = Some(now - 15 * 1000);
+
+        assert_eq!(timer.remaining_ms(now), 15 * 1000);
     }
 }

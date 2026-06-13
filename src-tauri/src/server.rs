@@ -19,7 +19,7 @@ use tokio::net::TcpListener;
 use tokio::time::{interval, Duration};
 use tower_http::cors::CorsLayer;
 
-use crate::state::{AppState, OutputMessage, RealtimeEvent, RundownTimingMode};
+use crate::state::{AppState, OutputMessage, OutputMessageDraft, RealtimeEvent, RundownTimingMode};
 
 pub async fn start_output_server(state: AppState, app: tauri::AppHandle) -> Result<(), String> {
     let network_host = local_network_ipv4().map(|ip| ip.to_string());
@@ -354,6 +354,8 @@ enum ClientCommand {
     SetLive { enabled: bool },
     #[serde(rename = "message/show")]
     ShowMessage(OutputMessage),
+    #[serde(rename = "message/draft")]
+    MessageDraft(OutputMessageDraft),
     #[serde(rename = "message/hide")]
     HideMessage,
 }
@@ -455,6 +457,9 @@ async fn apply_client_command(state: &AppState, command: ClientCommand) {
         }
         ClientCommand::ShowMessage(message) => {
             state.show_message(message).await;
+        }
+        ClientCommand::MessageDraft(draft) => {
+            state.update_message_draft(draft).await;
         }
         ClientCommand::HideMessage => {
             state.hide_message().await;

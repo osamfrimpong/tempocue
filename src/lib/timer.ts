@@ -32,7 +32,7 @@ export function getRemainingMs(state: TimerState, nowMs: number) {
   if (state.mode === "clock") return 0;
   if (state.status === "idle") return state.durationMs;
   if (state.mode === "end-at-time" && state.status !== "paused" && state.targetEndAtMs !== null) {
-    return state.targetEndAtMs - nowMs;
+    return Math.max(0, state.targetEndAtMs - nowMs);
   }
   if (state.status === "paused") return state.remainingAtPauseMs ?? state.durationMs;
   if (state.status === "finished") return 0;
@@ -40,7 +40,7 @@ export function getRemainingMs(state: TimerState, nowMs: number) {
 
   const elapsed = nowMs - state.startedAtMs - state.accumulatedPauseMs;
   if (state.mode === "countup") return elapsed;
-  return state.durationMs - elapsed;
+  return Math.max(0, state.durationMs - elapsed);
 }
 
 export function formatTimer(ms: number, mode: TimerState["mode"] = "countdown") {

@@ -52,6 +52,12 @@ export type OutputMessageFormatting = {
   body: OutputMessageTextStyle;
 };
 
+export type OutputMessageDraft = {
+  title: string;
+  body: string;
+  formatting: OutputMessageFormatting;
+};
+
 export type OutputMessageTextStyle = {
   bold: boolean;
   italic: boolean;
@@ -85,6 +91,7 @@ export type Snapshot = {
   timer: TimerState;
   rundown: RundownItem[];
   output: OutputState;
+  messageDraft: OutputMessageDraft;
   urls: ServerUrls;
 };
 
@@ -94,6 +101,7 @@ export type RealtimeEvent =
   | { type: "rundown/items"; payload: RundownItem[] }
   | { type: "rundown/active-item"; payload: { itemId: string } }
   | { type: "message/show"; payload: OutputMessage }
+  | { type: "message/draft"; payload: OutputMessageDraft }
   | { type: "message/hide"; payload: { id: string } }
   | { type: "output/blackout"; payload: { enabled: boolean } }
   | { type: "output/hide-timer"; payload: { enabled: boolean } }
