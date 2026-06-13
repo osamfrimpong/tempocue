@@ -494,3 +494,48 @@ fn dev_index_html() -> String {
 </html>"#
         .to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deserializes_browser_message_show_command() {
+        let payload = r##"{
+            "type": "message/show",
+            "payload": {
+                "id": "message-1",
+                "type": "lower-third",
+                "title": "Next",
+                "body": "Please welcome the next speaker",
+                "formatting": {
+                    "title": { "bold": false, "italic": false, "color": "#ffffff" },
+                    "body": { "bold": true, "italic": false, "color": "#ffffff" }
+                },
+                "flashing": false,
+                "visible": true,
+                "target": "all"
+            }
+        }"##;
+
+        let command = serde_json::from_str::<ClientCommand>(payload).expect("message/show should parse");
+
+        match command {
+            ClientCommand::ShowMessage(message) => {
+                assert_eq!(message.id, "message-1");
+                assert_eq!(message.title, "Next");
+                assert_eq!(message.message_type, "lower-third");
+                assert_eq!(message.target, "all");
+            }
+            _ => panic!("expected message/show command"),
+        }
+    }
+
+    #[test]
+    fn deserializes_browser_message_hide_command() {
+        let command = serde_json::from_str::<ClientCommand>(r#"{ "type": "message/hide" }"#)
+            .expect("message/hide should parse");
+
+        assert!(matches!(command, ClientCommand::HideMessage));
+    }
+}

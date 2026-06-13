@@ -134,7 +134,7 @@ export function Controller() {
 
   const sendMessage = () => {
     const message: OutputMessage = {
-      id: crypto.randomUUID(),
+      id: createMessageId(),
       type: "lower-third",
       title: messageDraft.title,
       body: messageDraft.body,
@@ -659,6 +659,14 @@ export function Controller() {
       )}
     </main>
   );
+}
+
+function createMessageId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  return `message-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function MessageFormatControls({
