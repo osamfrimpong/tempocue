@@ -1,10 +1,11 @@
 import { Link } from "react-router-dom";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, CheckCircle2, RotateCcw, Save } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { DEFAULT_TIMER_COLOR_SETTINGS, TIMER_COLORS, formatDurationInput, parseDuration } from "../../lib/timer";
 import { useTempoCueStore } from "../../stores/useTempoCueStore";
+import type { TimerColorSettings } from "../../types/timer";
 
 export function Settings() {
   const timerColorSettings = useTempoCueStore((state) => state.timerColorSettings);
@@ -12,8 +13,14 @@ export function Settings() {
   const [yellowInput, setYellowInput] = useState(formatDurationInput(timerColorSettings.yellowThresholdMs));
   const [redInput, setRedInput] = useState(formatDurationInput(timerColorSettings.redThresholdMs));
   const [saveToastVisible, setSaveToastVisible] = useState(false);
+  const lastLocalSettings = useRef<TimerColorSettings | null>(null);
 
   useEffect(() => {
+    if (lastLocalSettings.current && timerColorSettingsEqual(lastLocalSettings.current, timerColorSettings)) {
+      lastLocalSettings.current = null;
+      return;
+    }
+
     setYellowInput(formatDurationInput(timerColorSettings.yellowThresholdMs));
     setRedInput(formatDurationInput(timerColorSettings.redThresholdMs));
   }, [timerColorSettings.redThresholdMs, timerColorSettings.yellowThresholdMs]);
@@ -33,17 +40,45 @@ export function Settings() {
         ? "Red must start at or below the yellow threshold."
         : null;
 
-  const saveSettings = () => {
+  useEffect(() => {
     if (parsed.yellow === null || parsed.red === null || parsed.red > parsed.yellow) return;
-    setTimerColorSettings({
+
+    const nextSettings = {
       yellowThresholdMs: parsed.yellow,
       redThresholdMs: parsed.red,
-    });
+    };
+    if (timerColorSettingsEqual(nextSettings, timerColorSettings)) return;
+
+    const timeoutId = window.setTimeout(() => {
+      lastLocalSettings.current = nextSettings;
+      void setTimerColorSettings(nextSettings);
+    }, 250);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [
+    parsed.red,
+    parsed.yellow,
+    setTimerColorSettings,
+    timerColorSettings.redThresholdMs,
+    timerColorSettings.yellowThresholdMs,
+  ]);
+
+  const saveSettings = () => {
+    if (parsed.yellow === null || parsed.red === null || parsed.red > parsed.yellow) return;
+    const nextSettings = {
+      yellowThresholdMs: parsed.yellow,
+      redThresholdMs: parsed.red,
+    };
+    lastLocalSettings.current = nextSettings;
+    void setTimerColorSettings(nextSettings);
     setSaveToastVisible(true);
   };
 
   const resetSettings = () => {
-    setTimerColorSettings(DEFAULT_TIMER_COLOR_SETTINGS);
+    lastLocalSettings.current = DEFAULT_TIMER_COLOR_SETTINGS;
+    setYellowInput(formatDurationInput(DEFAULT_TIMER_COLOR_SETTINGS.yellowThresholdMs));
+    setRedInput(formatDurationInput(DEFAULT_TIMER_COLOR_SETTINGS.redThresholdMs));
+    void setTimerColorSettings(DEFAULT_TIMER_COLOR_SETTINGS);
   };
 
   useEffect(() => {
@@ -158,4 +193,8 @@ function ThresholdRow({ color, title, description }: { color: string; title: str
       </span>
     </div>
   );
+}
+
+function timerColorSettingsEqual(a: TimerColorSettings, b: TimerColorSettings) {
+  return a.yellowThresholdMs === b.yellowThresholdMs && a.redThresholdMs === b.redThresholdMs;
 }

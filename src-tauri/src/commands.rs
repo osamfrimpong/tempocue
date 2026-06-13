@@ -1,6 +1,6 @@
 use tauri::State;
 
-use crate::state::{AppState, OutputMessage, OutputMessageDraft, RundownItem, RundownTimingMode, Snapshot};
+use crate::state::{AppState, OutputMessage, OutputMessageDraft, RundownItem, RundownTimingMode, Snapshot, TimerColorSettings};
 
 #[tauri::command]
 pub async fn get_snapshot(state: State<'_, AppState>) -> Result<Snapshot, String> {
@@ -168,6 +168,12 @@ pub async fn show_message(message: OutputMessage, state: State<'_, AppState>) ->
 #[tauri::command]
 pub async fn update_message_draft(draft: OutputMessageDraft, state: State<'_, AppState>) -> Result<(), String> {
     state.update_message_draft(draft).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_timer_color_settings(settings: TimerColorSettings, state: State<'_, AppState>) -> Result<(), String> {
+    state.update_timer_color_settings(settings).await;
     Ok(())
 }
 

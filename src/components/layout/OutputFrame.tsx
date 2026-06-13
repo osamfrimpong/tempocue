@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { TimerDisplay } from "../timer/TimerDisplay";
 import { FormattedMessage } from "./FormattedMessage";
 import { useTicker } from "../../hooks/useTicker";
@@ -11,7 +10,6 @@ type OutputFrameProps = {
 };
 
 export function OutputFrame({ mode, transparent = false }: OutputFrameProps) {
-  const initialize = useTempoCueStore((state) => state.initialize);
   const timer = useTempoCueStore((state) => state.timer);
   const clockOffsetMs = useTempoCueStore((state) => state.clockOffsetMs);
   const output = useTempoCueStore((state) => state.output);
@@ -25,10 +23,6 @@ export function OutputFrame({ mode, transparent = false }: OutputFrameProps) {
     (output.message.target === mode || output.message.target === "all" || isPresenterOutput || mode === "lower-third")
       ? output.message
       : null;
-
-  useEffect(() => {
-    void initialize();
-  }, [initialize]);
 
   if (!output.live) {
     if (mode === "obs") {

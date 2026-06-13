@@ -70,13 +70,10 @@ const fallbackMessageDraft: OutputMessageDraft = {
   },
 };
 
-const timerColorSettingsKey = "tempocue.timerColorSettings";
-
 type StoreState = Snapshot & {
   connected: boolean;
   clockOffsetMs: number;
   timersByItem: Record<string, TimerState>;
-  timerColorSettings: TimerColorSettings;
   initialize: () => Promise<void>;
   createRundownItem: (item: { title: string; speaker: string; durationMs: number; timingMode: RundownTimingMode; endTime: string | null; notes: string; supportingFiles: string[] }) => Promise<void>;
   updateRundownItem: (item: { id: string; title: string; speaker: string; durationMs: number; timingMode: RundownTimingMode; endTime: string | null; notes: string; supportingFiles: string[] }) => Promise<void>;
@@ -93,7 +90,7 @@ type StoreState = Snapshot & {
   setBlackout: (enabled: boolean) => Promise<void>;
   setHideTimer: (enabled: boolean) => Promise<void>;
   setLive: (enabled: boolean) => Promise<void>;
-  setTimerColorSettings: (settings: TimerColorSettings) => void;
+  setTimerColorSettings: (settings: TimerColorSettings) => Promise<void>;
   updateMessageDraft: (draft: OutputMessageDraft) => Promise<void>;
   showMessage: (message: OutputMessage) => Promise<void>;
   hideMessage: () => Promise<void>;
@@ -101,6 +98,7 @@ type StoreState = Snapshot & {
 
 const canInvoke = "__TAURI_INTERNALS__" in window;
 let activeSocket: WebSocket | null = null;
+let initializationPromise: Promise<void> | null = null;
 let pendingCommands: ClientCommand[] = [];
 
 type ClientCommand =
@@ -142,6 +140,7 @@ type ClientCommand =
   | { type: "output/blackout"; payload: { enabled: boolean } }
   | { type: "output/hide-timer"; payload: { enabled: boolean } }
   | { type: "output/live"; payload: { enabled: boolean } }
+  | { type: "settings/timer-colors"; payload: TimerColorSettings }
   | { type: "message/draft"; payload: OutputMessageDraft }
   | { type: "message/show"; payload: OutputMessage }
   | { type: "message/hide" };
@@ -154,7 +153,7 @@ export const useTempoCueStore = create<StoreState>((set) => ({
   urls: fallbackUrls,
   connected: false,
   clockOffsetMs: 0,
-  timerColorSettings: readTimerColorSettings(),
+  timerColorSettings: DEFAULT_TIMER_COLOR_SETTINGS,
   timersByItem: {
     opening: createIdleTimer(DEFAULT_DURATION_MS),
     welcome: createIdleTimer(5 * 60 * 1000),
@@ -162,16 +161,23 @@ export const useTempoCueStore = create<StoreState>((set) => ({
   },
 
   initialize: async () => {
-    registerTimerColorStorageListener(set);
+    if (initializationPromise) return initializationPromise;
 
-    if (!canInvoke) {
-      connectWebSocket(resolveRealtimePort(), set);
-      return;
-    }
+    initializationPromise = (async () => {
+      if (!canInvoke) {
+        connectWebSocket(resolveRealtimePort(), set);
+        return;
+      }
 
-    const snapshot = await invoke<Snapshot>("get_snapshot");
-    applySnapshot(snapshot, set);
-    connectWebSocket(snapshot.urls.port, set);
+      const snapshot = await invoke<Snapshot>("get_snapshot");
+      applySnapshot(snapshot, set);
+      connectWebSocket(snapshot.urls.port, set, resolveWebSocketHost(snapshot.urls.local.control));
+    })().catch((error) => {
+      initializationPromise = null;
+      throw error;
+    });
+
+    return initializationPromise;
   },
 
   createRundownItem: async (item) => {
@@ -305,10 +311,11 @@ export const useTempoCueStore = create<StoreState>((set) => ({
     return sendRemoteCommand({ type: "output/live", payload: { enabled } });
   },
 
-  setTimerColorSettings: (settings) => {
+  setTimerColorSettings: async (settings) => {
     const timerColorSettings = normalizeTimerColorSettings(settings);
-    window.localStorage.setItem(timerColorSettingsKey, JSON.stringify(timerColorSettings));
     set({ timerColorSettings });
+    if (canInvoke) return invoke("set_timer_color_settings", { settings: timerColorSettings });
+    return sendRemoteCommand({ type: "settings/timer-colors", payload: timerColorSettings });
   },
 
   updateMessageDraft: async (draft: OutputMessageDraft) => {
@@ -335,6 +342,7 @@ function applySnapshot(snapshot: Snapshot, set: (state: Partial<StoreState>) => 
   set({
     ...snapshot,
     messageDraft: normalizeMessageDraft(snapshot.messageDraft ?? fallbackMessageDraft),
+    timerColorSettings: normalizeTimerColorSettings(snapshot.timerColorSettings ?? DEFAULT_TIMER_COLOR_SETTINGS),
     connected: true,
     clockOffsetMs: snapshot.timer.serverNowMs - Date.now(),
   });
@@ -368,12 +376,16 @@ function applyRealtimeEvent(event: RealtimeEvent, set: (state: Partial<StoreStat
   if (event.type === "output/blackout") set((state) => ({ output: { ...state.output, blackout: event.payload.enabled } }));
   if (event.type === "output/hide-timer") set((state) => ({ output: { ...state.output, hideTimer: event.payload.enabled } }));
   if (event.type === "output/live") set((state) => ({ output: { ...state.output, live: event.payload.enabled } }));
+  if (event.type === "settings/timer-colors") set({ timerColorSettings: normalizeTimerColorSettings(event.payload) });
 }
 
-function connectWebSocket(port: number, set: (state: Partial<StoreState> | ((state: StoreState) => Partial<StoreState>)) => void) {
+function connectWebSocket(
+  port: number,
+  set: (state: Partial<StoreState> | ((state: StoreState) => Partial<StoreState>)) => void,
+  host = window.location.hostname || "127.0.0.1",
+) {
   if (activeSocket && activeSocket.readyState <= WebSocket.OPEN) return;
 
-  const host = window.location.hostname || "127.0.0.1";
   const socket = new WebSocket(`ws://${host}:${port}/ws`);
   activeSocket = socket;
   socket.onopen = () => {
@@ -383,7 +395,7 @@ function connectWebSocket(port: number, set: (state: Partial<StoreState> | ((sta
   socket.onclose = () => {
     if (activeSocket === socket) activeSocket = null;
     set({ connected: false });
-    window.setTimeout(() => connectWebSocket(port, set), 1000);
+    window.setTimeout(() => connectWebSocket(port, set, host), 1000);
   };
   socket.onmessage = (event) => {
     applyRealtimeEvent(JSON.parse(event.data) as RealtimeEvent, set);
@@ -412,8 +424,16 @@ function flushPendingCommands(socket: WebSocket) {
 
 function resolveRealtimePort() {
   const port = Number(window.location.port);
-  if (!Number.isFinite(port) || port === 0 || port === 1420) return 4310;
+  if (!Number.isFinite(port) || port === 0 || (port >= 1420 && port <= 1430)) return 4310;
   return port;
+}
+
+function resolveWebSocketHost(url: string) {
+  try {
+    return new URL(url).hostname || "127.0.0.1";
+  } catch {
+    return "127.0.0.1";
+  }
 }
 
 function normalizeMessageDraft(draft: OutputMessageDraft): OutputMessageDraft {
@@ -473,16 +493,6 @@ function setTimerRemaining(timer: TimerState, remainingMs: number, now: number):
   };
 }
 
-function readTimerColorSettings() {
-  try {
-    const raw = window.localStorage.getItem(timerColorSettingsKey);
-    if (!raw) return DEFAULT_TIMER_COLOR_SETTINGS;
-    return normalizeTimerColorSettings(JSON.parse(raw) as Partial<TimerColorSettings>);
-  } catch {
-    return DEFAULT_TIMER_COLOR_SETTINGS;
-  }
-}
-
 function normalizeTimerColorSettings(settings: Partial<TimerColorSettings>) {
   const yellowThresholdMs = Number(settings.yellowThresholdMs);
   const redThresholdMs = Number(settings.redThresholdMs);
@@ -495,17 +505,4 @@ function normalizeTimerColorSettings(settings: Partial<TimerColorSettings>) {
       ? Math.max(0, Math.round(redThresholdMs))
       : DEFAULT_TIMER_COLOR_SETTINGS.redThresholdMs,
   };
-}
-
-let timerColorStorageListenerRegistered = false;
-
-function registerTimerColorStorageListener(set: (state: Partial<StoreState>) => void) {
-  if (timerColorStorageListenerRegistered) return;
-  timerColorStorageListenerRegistered = true;
-
-  window.addEventListener("storage", (event) => {
-    if (event.key === timerColorSettingsKey) {
-      set({ timerColorSettings: readTimerColorSettings() });
-    }
-  });
 }

@@ -47,7 +47,6 @@ type ItemDialogMode = "create" | "edit";
 type ItemTimingMode = "duration" | "end-time";
 
 export function Controller() {
-  const initialize = useTempoCueStore((state) => state.initialize);
   const timer = useTempoCueStore((state) => state.timer);
   const rundown = useTempoCueStore((state) => state.rundown);
   const output = useTempoCueStore((state) => state.output);
@@ -82,14 +81,11 @@ export function Controller() {
   const [activationCandidate, setActivationCandidate] = useState<RundownItem | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<RundownItem | null>(null);
   const [localUrlsExpanded, setLocalUrlsExpanded] = useState(false);
+  const [timeAdjustmentMinutes, setTimeAdjustmentMinutes] = useState("1");
   const previousNetworkHost = useRef<string | null>(null);
   const [networkChanged, setNetworkChanged] = useState(false);
 
   useKeyboardShortcuts();
-
-  useEffect(() => {
-    void initialize();
-  }, [initialize]);
 
   useEffect(() => {
     if (previousNetworkHost.current !== null && previousNetworkHost.current !== urls.networkHost) {
@@ -126,6 +122,7 @@ export function Controller() {
           })()
         : null;
   const itemCanSave = Boolean(newTitle.trim()) && itemDurationMs !== null;
+  const timeAdjustmentMs = parseMinuteAdjustment(timeAdjustmentMinutes);
   const networkStatusLabel = networkChanged
     ? "Network changed: URLs updated"
     : urls.network
@@ -148,6 +145,11 @@ export function Controller() {
   const toggleMessageFlash = () => {
     if (!output.message) return;
     void showMessage({ ...output.message, flashing: !output.message.flashing });
+  };
+
+  const adjustTimer = (direction: 1 | -1) => {
+    if (timeAdjustmentMs === null) return;
+    void addTime(direction * timeAdjustmentMs);
   };
 
   const updateMessageStyle = (updater: (style: OutputMessageTextStyle) => OutputMessageTextStyle) => {
@@ -421,13 +423,36 @@ export function Controller() {
             </div>
 
             <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-              <Button className="min-w-0 px-3 sm:px-4" variant="outline" onClick={() => void addTime(60_000)}>
+              <div className="col-span-2 grid min-w-36 grid-cols-[minmax(0,1fr)_auto] items-center rounded-md border border-input bg-background sm:col-span-1 sm:w-40">
+                <Input
+                  aria-label="Adjustment minutes"
+                  className="h-10 border-0 bg-transparent font-mono tabular-nums focus-visible:ring-0"
+                  inputMode="decimal"
+                  min="0.1"
+                  step="0.5"
+                  type="number"
+                  value={timeAdjustmentMinutes}
+                  onChange={(event) => setTimeAdjustmentMinutes(event.target.value)}
+                />
+                <span className="pr-3 text-xs font-medium uppercase text-muted-foreground">min</span>
+              </div>
+              <Button
+                className="min-w-0 px-3 sm:px-4"
+                variant="outline"
+                disabled={timeAdjustmentMs === null}
+                onClick={() => adjustTimer(1)}
+              >
                 <Plus className="h-4 w-4" />
-                1 min
+                Add
               </Button>
-              <Button className="min-w-0 px-3 sm:px-4" variant="outline" onClick={() => void addTime(-60_000)}>
+              <Button
+                className="min-w-0 px-3 sm:px-4"
+                variant="outline"
+                disabled={timeAdjustmentMs === null}
+                onClick={() => adjustTimer(-1)}
+              >
                 <Minus className="h-4 w-4" />
-                1 min
+                Subtract
               </Button>
               <Button
                 className="min-w-0 px-3 sm:px-4"
@@ -806,6 +831,12 @@ function timeInputToDate(value: string, nowMs: number) {
   const date = new Date(nowMs);
   date.setHours(Number(hours), Number(minutes), 0, 0);
   return date;
+}
+
+function parseMinuteAdjustment(value: string) {
+  const minutes = Number(value);
+  if (!Number.isFinite(minutes) || minutes <= 0) return null;
+  return Math.round(minutes * 60_000);
 }
 
 function UrlRow({ label, value, disabled }: { label: string; value: string; disabled: boolean }) {

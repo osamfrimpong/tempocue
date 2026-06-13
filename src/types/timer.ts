@@ -89,6 +89,7 @@ export type Snapshot = {
   rundown: RundownItem[];
   output: OutputState;
   messageDraft: OutputMessageDraft;
+  timerColorSettings: TimerColorSettings;
   urls: ServerUrls;
 };
 
@@ -102,4 +103,5 @@ export type RealtimeEvent =
   | { type: "message/hide"; payload: { id: string } }
   | { type: "output/blackout"; payload: { enabled: boolean } }
   | { type: "output/hide-timer"; payload: { enabled: boolean } }
-  | { type: "output/live"; payload: { enabled: boolean } };
+  | { type: "output/live"; payload: { enabled: boolean } }
+  | { type: "settings/timer-colors"; payload: TimerColorSettings };

@@ -5,6 +5,9 @@ use tokio::sync::{broadcast, RwLock};
 
 use crate::timer::{TimerState, TimerStatus, DEFAULT_DURATION_MS};
 
+const DEFAULT_YELLOW_THRESHOLD_MS: i64 = 5 * 60 * 1000;
+const DEFAULT_RED_THRESHOLD_MS: i64 = 60 * 1000;
+
 #[derive(Clone)]
 pub struct AppState {
     inner: Arc<RwLock<InnerState>>,
@@ -18,6 +21,7 @@ pub struct Snapshot {
     pub rundown: Vec<RundownItem>,
     pub output: OutputState,
     pub message_draft: OutputMessageDraft,
+    pub timer_color_settings: TimerColorSettings,
     pub urls: ServerUrls,
 }
 
@@ -100,6 +104,13 @@ pub struct OutputMessageTextStyle {
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TimerColorSettings {
+    pub yellow_threshold_ms: i64,
+    pub red_threshold_ms: i64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ServerUrls {
     pub port: u16,
     pub local: UrlSet,
@@ -148,6 +159,8 @@ pub enum RealtimeEvent {
     HideTimer { enabled: bool },
     #[serde(rename = "output/live")]
     Live { enabled: bool },
+    #[serde(rename = "settings/timer-colors")]
+    TimerColorSettings(TimerColorSettings),
 }
 
 struct InnerState {
@@ -156,6 +169,7 @@ struct InnerState {
     rundown: Vec<RundownItem>,
     output: OutputState,
     message_draft: OutputMessageDraft,
+    timer_color_settings: TimerColorSettings,
     urls: ServerUrls,
 }
 
@@ -187,6 +201,7 @@ impl Default for AppState {
                     active_item_id,
                 },
                 message_draft: default_message_draft(),
+                timer_color_settings: default_timer_color_settings(),
                 urls: urls_for_host_port(None, 4310),
             })),
             tx,
@@ -208,6 +223,7 @@ impl AppState {
             rundown: state.rundown.clone(),
             output: state.output.clone(),
             message_draft: state.message_draft.clone(),
+            timer_color_settings: state.timer_color_settings.clone(),
             urls: state.urls.clone(),
         }
     }
@@ -223,6 +239,7 @@ impl AppState {
                 rundown: state.rundown.clone(),
                 output: state.output.clone(),
                 message_draft: state.message_draft.clone(),
+                timer_color_settings: state.timer_color_settings.clone(),
                 urls: state.urls.clone(),
             }
         };
@@ -560,6 +577,15 @@ impl AppState {
         self.broadcast(RealtimeEvent::MessageDraft(draft));
     }
 
+    pub async fn update_timer_color_settings(&self, settings: TimerColorSettings) {
+        let settings = normalize_timer_color_settings(settings);
+        {
+            let mut state = self.inner.write().await;
+            state.timer_color_settings = settings.clone();
+        }
+        self.broadcast(RealtimeEvent::TimerColorSettings(settings));
+    }
+
     pub async fn hide_message(&self) {
         let id = {
             let mut state = self.inner.write().await;
@@ -598,6 +624,20 @@ fn default_message_draft() -> OutputMessageDraft {
                 color: "#ffffff".to_string(),
             },
         },
+    }
+}
+
+fn default_timer_color_settings() -> TimerColorSettings {
+    TimerColorSettings {
+        yellow_threshold_ms: DEFAULT_YELLOW_THRESHOLD_MS,
+        red_threshold_ms: DEFAULT_RED_THRESHOLD_MS,
+    }
+}
+
+fn normalize_timer_color_settings(settings: TimerColorSettings) -> TimerColorSettings {
+    TimerColorSettings {
+        yellow_threshold_ms: settings.yellow_threshold_ms.max(0),
+        red_threshold_ms: settings.red_threshold_ms.max(0),
     }
 }
 

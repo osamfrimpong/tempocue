@@ -19,7 +19,7 @@ use tokio::net::TcpListener;
 use tokio::time::{interval, Duration};
 use tower_http::cors::CorsLayer;
 
-use crate::state::{AppState, OutputMessage, OutputMessageDraft, RealtimeEvent, RundownTimingMode};
+use crate::state::{AppState, OutputMessage, OutputMessageDraft, RealtimeEvent, RundownTimingMode, TimerColorSettings};
 
 pub async fn start_output_server(state: AppState, app: tauri::AppHandle) -> Result<(), String> {
     let network_host = local_network_ipv4().map(|ip| ip.to_string());
@@ -358,6 +358,8 @@ enum ClientCommand {
     MessageDraft(OutputMessageDraft),
     #[serde(rename = "message/hide")]
     HideMessage,
+    #[serde(rename = "settings/timer-colors")]
+    TimerColorSettings(TimerColorSettings),
 }
 
 async fn apply_client_command(state: &AppState, command: ClientCommand) {
@@ -464,6 +466,9 @@ async fn apply_client_command(state: &AppState, command: ClientCommand) {
         ClientCommand::HideMessage => {
             state.hide_message().await;
         }
+        ClientCommand::TimerColorSettings(settings) => {
+            state.update_timer_color_settings(settings).await;
+        }
     }
 }
 
@@ -534,5 +539,27 @@ mod tests {
             .expect("message/hide should parse");
 
         assert!(matches!(command, ClientCommand::HideMessage));
+    }
+
+    #[test]
+    fn deserializes_browser_timer_color_settings_command() {
+        let payload = r#"{
+            "type": "settings/timer-colors",
+            "payload": {
+                "yellowThresholdMs": 300000,
+                "redThresholdMs": 60000
+            }
+        }"#;
+
+        let command = serde_json::from_str::<ClientCommand>(payload)
+            .expect("settings/timer-colors should parse");
+
+        match command {
+            ClientCommand::TimerColorSettings(settings) => {
+                assert_eq!(settings.yellow_threshold_ms, 300000);
+                assert_eq!(settings.red_threshold_ms, 60000);
+            }
+            _ => panic!("expected settings/timer-colors command"),
+        }
     }
 }
