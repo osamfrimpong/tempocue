@@ -5,14 +5,7 @@ import { cn } from "../../lib/utils";
 type FormattedMessageProps = {
   message: OutputMessage;
   className?: string;
-  titleClassName?: string;
   bodyClassName?: string;
-};
-
-const defaultTitleStyle: OutputMessageTextStyle = {
-  bold: false,
-  italic: false,
-  color: "#ffffff",
 };
 
 const defaultBodyStyle: OutputMessageTextStyle = {
@@ -21,18 +14,13 @@ const defaultBodyStyle: OutputMessageTextStyle = {
   color: "#ffffff",
 };
 
-export function FormattedMessage({ message, className, titleClassName, bodyClassName }: FormattedMessageProps) {
+export function FormattedMessage({ message, className, bodyClassName }: FormattedMessageProps) {
   return (
     <div className={cn("min-w-0", className)}>
       <MessageText
-        text={message.title}
-        textStyle={message.formatting?.title ?? defaultTitleStyle}
-        className={cn("whitespace-pre-wrap break-words", titleClassName)}
-      />
-      <MessageText
         text={message.body}
         textStyle={message.formatting?.body ?? defaultBodyStyle}
-        className={cn("mt-2 whitespace-pre-wrap break-words", bodyClassName)}
+        className={cn("whitespace-pre-wrap break-words", bodyClassName)}
       />
     </div>
   );

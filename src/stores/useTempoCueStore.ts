@@ -64,10 +64,8 @@ const fallbackOutput: OutputState = {
 };
 
 const fallbackMessageDraft: OutputMessageDraft = {
-  title: "Next",
   body: "Please welcome the next speaker",
   formatting: {
-    title: { bold: false, italic: false, color: "#ffffff" },
     body: { bold: true, italic: false, color: "#ffffff" },
   },
 };
@@ -420,18 +418,16 @@ function resolveRealtimePort() {
 
 function normalizeMessageDraft(draft: OutputMessageDraft): OutputMessageDraft {
   return {
-    title: draft.title,
     body: draft.body,
     formatting: {
-      title: normalizeMessageTextStyle(draft.formatting?.title, fallbackMessageDraft.formatting.title),
       body: normalizeMessageTextStyle(draft.formatting?.body, fallbackMessageDraft.formatting.body),
     },
   };
 }
 
 function normalizeMessageTextStyle(
-  style: Partial<OutputMessageDraft["formatting"]["title"]> | undefined,
-  fallback: OutputMessageDraft["formatting"]["title"],
+  style: Partial<OutputMessageDraft["formatting"]["body"]> | undefined,
+  fallback: OutputMessageDraft["formatting"]["body"],
 ) {
   return {
     bold: Boolean(style?.bold),

@@ -506,10 +506,8 @@ mod tests {
             "payload": {
                 "id": "message-1",
                 "type": "lower-third",
-                "title": "Next",
                 "body": "Please welcome the next speaker",
                 "formatting": {
-                    "title": { "bold": false, "italic": false, "color": "#ffffff" },
                     "body": { "bold": true, "italic": false, "color": "#ffffff" }
                 },
                 "flashing": false,
@@ -523,7 +521,6 @@ mod tests {
         match command {
             ClientCommand::ShowMessage(message) => {
                 assert_eq!(message.id, "message-1");
-                assert_eq!(message.title, "Next");
                 assert_eq!(message.message_type, "lower-third");
                 assert_eq!(message.target, "all");
             }

@@ -39,7 +39,6 @@ export type RundownItem = {
 export type OutputMessage = {
   id: string;
   type: "fullscreen" | "lower-third" | "emergency" | "announcement";
-  title: string;
   body: string;
   formatting?: OutputMessageFormatting | null;
   flashing?: boolean;
@@ -48,12 +47,10 @@ export type OutputMessage = {
 };
 
 export type OutputMessageFormatting = {
-  title: OutputMessageTextStyle;
   body: OutputMessageTextStyle;
 };
 
 export type OutputMessageDraft = {
-  title: string;
   body: string;
   formatting: OutputMessageFormatting;
 };

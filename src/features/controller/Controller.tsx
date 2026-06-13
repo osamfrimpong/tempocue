@@ -45,7 +45,6 @@ import type { OutputMessage, OutputMessageTextStyle, RundownItem } from "../../t
 
 type ItemDialogMode = "create" | "edit";
 type ItemTimingMode = "duration" | "end-time";
-type MessageStylePart = "title" | "body";
 
 export function Controller() {
   const initialize = useTempoCueStore((state) => state.initialize);
@@ -136,7 +135,6 @@ export function Controller() {
     const message: OutputMessage = {
       id: createMessageId(),
       type: "lower-third",
-      title: messageDraft.title,
       body: messageDraft.body,
       formatting: messageDraft.formatting,
       flashing: false,
@@ -151,10 +149,10 @@ export function Controller() {
     void showMessage({ ...output.message, flashing: !output.message.flashing });
   };
 
-  const updateMessageStyle = (part: MessageStylePart, updater: (style: OutputMessageTextStyle) => OutputMessageTextStyle) => {
+  const updateMessageStyle = (updater: (style: OutputMessageTextStyle) => OutputMessageTextStyle) => {
     void updateMessageDraft({
       ...messageDraft,
-      formatting: { ...messageDraft.formatting, [part]: updater(messageDraft.formatting[part]) },
+      formatting: { ...messageDraft.formatting, body: updater(messageDraft.formatting.body) },
     });
   };
 
@@ -369,7 +367,6 @@ export function Controller() {
                 <FormattedMessage
                   message={output.message}
                   className={output.message.flashing ? "message-flash" : undefined}
-                  titleClassName="text-xl font-semibold"
                   bodyClassName="text-3xl font-bold sm:text-4xl"
                 />
               )}
@@ -446,16 +443,6 @@ export function Controller() {
               Messages
             </div>
             <div className="grid gap-3">
-              <Input
-                aria-label="Message title"
-                value={messageDraft.title}
-                onChange={(event) => void updateMessageDraft({ ...messageDraft, title: event.target.value })}
-              />
-              <MessageFormatControls
-                label="Title style"
-                style={messageDraft.formatting.title}
-                onChange={(updater) => updateMessageStyle("title", updater)}
-              />
               <Textarea
                 aria-label="Message body"
                 value={messageDraft.body}
@@ -464,7 +451,7 @@ export function Controller() {
               <MessageFormatControls
                 label="Body style"
                 style={messageDraft.formatting.body}
-                onChange={(updater) => updateMessageStyle("body", updater)}
+                onChange={updateMessageStyle}
               />
               <div className="grid grid-cols-3 gap-2 sm:flex">
                 <Button className="min-w-0 px-3 sm:px-4" onClick={sendMessage} disabled={Boolean(output.message)}>

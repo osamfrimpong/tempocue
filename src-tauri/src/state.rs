@@ -68,7 +68,6 @@ pub struct OutputMessage {
     pub id: String,
     #[serde(rename = "type")]
     pub message_type: String,
-    pub title: String,
     pub body: String,
     #[serde(default)]
     pub formatting: Option<OutputMessageFormatting>,
@@ -81,14 +80,12 @@ pub struct OutputMessage {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OutputMessageFormatting {
-    pub title: OutputMessageTextStyle,
     pub body: OutputMessageTextStyle,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OutputMessageDraft {
-    pub title: String,
     pub body: String,
     pub formatting: OutputMessageFormatting,
 }
@@ -593,14 +590,8 @@ fn next_item_color(index: usize) -> String {
 
 fn default_message_draft() -> OutputMessageDraft {
     OutputMessageDraft {
-        title: "Next".to_string(),
         body: "Please welcome the next speaker".to_string(),
         formatting: OutputMessageFormatting {
-            title: OutputMessageTextStyle {
-                bold: false,
-                italic: false,
-                color: "#ffffff".to_string(),
-            },
             body: OutputMessageTextStyle {
                 bold: true,
                 italic: false,

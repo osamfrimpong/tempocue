@@ -87,7 +87,6 @@ export function OutputFrame({ mode, transparent = false }: OutputFrameProps) {
             <FormattedMessage
               message={targetedMessage}
               className={targetedMessage.flashing ? "message-flash" : undefined}
-              titleClassName="text-xl uppercase text-white/70"
               bodyClassName="text-5xl font-semibold"
             />
             {!output.hideTimer && <TimerDisplay timer={timer} nowMs={now} compact size="lower-third" className="text-white" />}
@@ -124,7 +123,6 @@ export function OutputFrame({ mode, transparent = false }: OutputFrameProps) {
             <FormattedMessage
               message={targetedMessage}
               className={targetedMessage.flashing ? "message-flash" : undefined}
-              titleClassName="text-[clamp(1.5rem,4vw,4.5rem)] font-semibold"
               bodyClassName="text-[clamp(2rem,6vw,6.5rem)] font-bold"
             />
           )}

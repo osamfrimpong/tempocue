@@ -17,7 +17,7 @@ TempoCue currently includes:
 - Editable rundown items with title, speaker, duration, notes, and supporting file paths/URLs
 - Per-rundown-item timer state while switching between items
 - Blackout and hide-timer controls for outputs
-- Lower-third message display with title/body styling, color options, flash, and hide
+- Lower-third message display with body styling, color options, flash, and hide
 - Keyboard shortcuts for common show-control actions
 - WebSocket snapshot/update delivery for output windows
 - Local frontend fallback behavior when running outside Tauri
