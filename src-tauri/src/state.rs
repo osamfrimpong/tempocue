@@ -322,11 +322,10 @@ impl AppState {
                 state.timer = timer.clone();
                 state.timers_by_item.insert(item_id.clone(), timer.clone());
                 Some(timer)
-            } else if state.timer.status == TimerStatus::Running {
-                None
             } else {
                 let previous_item_id = state.output.active_item_id.clone();
-                let previous_timer = state.timer.clone();
+                let mut previous_timer = state.timer.clone();
+                previous_timer.pause();
                 state.timers_by_item.insert(previous_item_id, previous_timer);
 
                 let duration_ms = state
@@ -347,6 +346,7 @@ impl AppState {
                             .map(timer_for_rundown_item)
                             .unwrap_or_else(|| TimerState::new(duration_ms))
                     });
+                next_timer.pause();
                 next_timer.touch_server_now();
                 state.output.active_item_id = item_id.clone();
                 state.timer = next_timer.clone();

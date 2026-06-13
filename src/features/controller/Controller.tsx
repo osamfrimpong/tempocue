@@ -79,6 +79,7 @@ export function Controller() {
   const [newNotes, setNewNotes] = useState("");
   const [itemDialogMode, setItemDialogMode] = useState<ItemDialogMode | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [activationCandidate, setActivationCandidate] = useState<RundownItem | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<RundownItem | null>(null);
   const [localUrlsExpanded, setLocalUrlsExpanded] = useState(false);
   const previousNetworkHost = useRef<string | null>(null);
@@ -222,6 +223,12 @@ export function Controller() {
     setDeleteCandidate(null);
   };
 
+  const confirmActivateRundownItem = () => {
+    if (!activationCandidate) return;
+    void selectRundownItem(activationCandidate.id);
+    setActivationCandidate(null);
+  };
+
   const openTimePickerFromField = (event: MouseEvent<HTMLDivElement> | TouchEvent<HTMLDivElement>) => {
     if (!(event.target instanceof HTMLInputElement)) return;
     const button = event.currentTarget.querySelector<HTMLButtonElement>('[data-testid="time-button"]');
@@ -277,7 +284,6 @@ export function Controller() {
           <div className="grid max-h-80 min-h-0 flex-1 content-start gap-2 overflow-y-auto p-3 lg:max-h-none">
             {rundown.map((item, index) => {
               const isActiveItem = item.id === output.activeItemId;
-              const itemSelectionDisabled = timerIsRunning && !isActiveItem;
               const activeItemActionDisabled = timerIsRunning && isActiveItem;
 
               return (
@@ -288,33 +294,40 @@ export function Controller() {
                   }`}
                 >
                   <span className="h-full min-h-14 rounded-full" style={{ backgroundColor: item.color }} />
-                  <button
-                    className={`min-w-0 text-left ${
-                      itemSelectionDisabled ? "cursor-not-allowed text-muted-foreground/70" : ""
-                    }`}
-                    disabled={itemSelectionDisabled}
-                    onClick={() => void selectRundownItem(item.id)}
-                  >
+                  <div className="min-w-0 text-left">
                     <span className="block text-sm text-muted-foreground">{String(index + 1).padStart(2, "0")}</span>
                     <span className="block truncate font-medium">{item.title}</span>
                     <span className="block truncate text-sm text-muted-foreground">{item.speaker}</span>
-                  </button>
+                  </div>
                   <div className="grid justify-items-end gap-2">
                     <span className="font-mono text-sm tabular-nums">{Math.round(item.durationMs / 60000)}m</span>
                     <div className="flex gap-1">
+                      {!isActiveItem && (
+                        <Button
+                          variant="secondary"
+                          size="icon"
+                          aria-label={`Activate ${item.title}`}
+                          title="Activate timer"
+                          onClick={() => setActivationCandidate(item)}
+                        >
+                          <Check className="h-4 w-4" />
+                        </Button>
+                      )}
                       <Button
-                        variant="ghost"
+                        variant="secondary"
                         size="icon"
                         aria-label={`Edit ${item.title}`}
+                        title="Edit item"
                         disabled={activeItemActionDisabled}
                         onClick={() => openEditDialog(item)}
                       >
                         <Pencil className="h-4 w-4" />
                       </Button>
                       <Button
-                        variant="ghost"
+                        variant="secondary"
                         size="icon"
                         aria-label={`Delete ${item.title}`}
+                        title="Delete item"
                         disabled={activeItemActionDisabled || rundown.length === 1}
                         onClick={() => setDeleteCandidate(item)}
                       >
@@ -615,6 +628,34 @@ export function Controller() {
                   {itemDialogMode === "edit" ? "Save changes" : "Add item"}
                 </Button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activationCandidate && (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="activate-rundown-item-title"
+        >
+          <div className="w-full max-w-sm rounded-md border border-border bg-card p-5 shadow-2xl">
+            <div className="text-sm font-semibold uppercase text-muted-foreground">Activate timer</div>
+            <div id="activate-rundown-item-title" className="mt-1 text-xl font-semibold">
+              Make {activationCandidate.title} active?
+            </div>
+            <p className="mt-3 text-sm text-muted-foreground">
+              This switches the active timer without starting it. Any running timer will be paused.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setActivationCandidate(null)}>
+                Cancel
+              </Button>
+              <Button onClick={confirmActivateRundownItem}>
+                <Check className="h-4 w-4" />
+                Make active
+              </Button>
             </div>
           </div>
         </div>
