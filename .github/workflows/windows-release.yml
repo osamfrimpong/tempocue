@@ -40,6 +40,7 @@ jobs:
         with:
           path: |
             ~/.cargo/registry
+            ~/.cargo/registry/cache
             ~/.cargo/git
             src-tauri/target
           key: windows-cargo-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}

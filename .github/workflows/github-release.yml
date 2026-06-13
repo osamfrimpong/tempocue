@@ -106,6 +106,7 @@ jobs:
         with:
           path: |
             ~/.cargo/registry
+            ~/.cargo/registry/cache
             ~/.cargo/git
             src-tauri/target
           key: ${{ matrix.cache-prefix }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src-tauri/Cargo.lock') }}
