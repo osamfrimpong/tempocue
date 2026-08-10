@@ -8,6 +8,7 @@ import {
   Clock,
   Check,
   Copy,
+  Download,
   ExternalLink,
   EyeOff,
   FileText,
@@ -28,6 +29,7 @@ import {
   SkipForward,
   Square,
   Trash2,
+  Upload,
   X,
   Zap,
 } from "lucide-react";
@@ -64,6 +66,8 @@ export function Controller() {
   const createRundownItem = useTempoCueStore((state) => state.createRundownItem);
   const updateRundownItem = useTempoCueStore((state) => state.updateRundownItem);
   const deleteRundownItem = useTempoCueStore((state) => state.deleteRundownItem);
+  const exportScheduleFile = useTempoCueStore((state) => state.exportScheduleFile);
+  const importScheduleFile = useTempoCueStore((state) => state.importScheduleFile);
   const setBlackout = useTempoCueStore((state) => state.setBlackout);
   const setHideTimer = useTempoCueStore((state) => state.setHideTimer);
   const setLive = useTempoCueStore((state) => state.setLive);
@@ -84,6 +88,7 @@ export function Controller() {
   const [timeAdjustmentMinutes, setTimeAdjustmentMinutes] = useState("1");
   const previousNetworkHost = useRef<string | null>(null);
   const [networkChanged, setNetworkChanged] = useState(false);
+  const [scheduleNotice, setScheduleNotice] = useState<string | null>(null);
 
   useKeyboardShortcuts();
 
@@ -237,6 +242,24 @@ export function Controller() {
     button?.click();
   };
 
+  const exportSchedule = async () => {
+    try {
+      const fileName = await exportScheduleFile();
+      if (fileName) setScheduleNotice(`Exported ${fileName}`);
+    } catch (error) {
+      setScheduleNotice(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const importSchedule = async () => {
+    try {
+      const fileName = await importScheduleFile();
+      if (fileName) setScheduleNotice(`Imported ${fileName}`);
+    } catch (error) {
+      setScheduleNotice(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   return (
     <main className="flex h-dvh w-screen flex-col overflow-hidden bg-background text-foreground">
       <header className="flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-3 py-3 sm:px-5 lg:h-16 lg:flex-nowrap lg:py-0">
@@ -282,6 +305,17 @@ export function Controller() {
                 <Plus className="h-4 w-4" />
               </Button>
             </div>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <Button variant="outline" size="sm" onClick={() => void importSchedule()}>
+                <Upload className="h-4 w-4" />
+                Import
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => void exportSchedule()}>
+                <Download className="h-4 w-4" />
+                Export
+              </Button>
+            </div>
+         
           </div>
           <div className="grid max-h-80 min-h-0 flex-1 content-start gap-2 overflow-y-auto p-3 lg:max-h-none">
             {rundown.map((item, index) => {

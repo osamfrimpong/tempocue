@@ -19,7 +19,7 @@ use tokio::net::TcpListener;
 use tokio::time::{interval, Duration};
 use tower_http::cors::CorsLayer;
 
-use crate::state::{AppState, OutputMessage, OutputMessageDraft, RealtimeEvent, RundownTimingMode, TimerColorSettings};
+use crate::state::{AppState, OutputMessage, OutputMessageDraft, RealtimeEvent, RundownItem, RundownTimingMode, TimerColorSettings};
 
 pub async fn start_output_server(state: AppState, app: tauri::AppHandle) -> Result<(), String> {
     let network_host = local_network_ipv4().map(|ip| ip.to_string());
@@ -346,6 +346,8 @@ enum ClientCommand {
         #[serde(rename = "itemId")]
         item_id: String,
     },
+    #[serde(rename = "rundown/replace")]
+    ReplaceRundown { rundown: Vec<RundownItem> },
     #[serde(rename = "output/blackout")]
     SetBlackout { enabled: bool },
     #[serde(rename = "output/hide-timer")]
@@ -447,6 +449,9 @@ async fn apply_client_command(state: &AppState, command: ClientCommand) {
         }
         ClientCommand::DeleteItem { item_id } => {
             state.delete_item(item_id).await;
+        }
+        ClientCommand::ReplaceRundown { rundown } => {
+            let _ = state.replace_rundown(rundown).await;
         }
         ClientCommand::SetBlackout { enabled } => {
             state.set_blackout(enabled).await;

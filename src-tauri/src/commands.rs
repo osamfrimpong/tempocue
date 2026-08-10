@@ -142,6 +142,44 @@ pub async fn delete_rundown_item(item_id: String, state: State<'_, AppState>) ->
 }
 
 #[tauri::command]
+pub async fn replace_rundown(rundown: Vec<RundownItem>, state: State<'_, AppState>) -> Result<(), String> {
+    state.replace_rundown(rundown).await
+}
+
+#[tauri::command]
+pub async fn export_schedule_file(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let Some(file) = rfd::AsyncFileDialog::new()
+        .set_title("Export TempoCue schedule")
+        .set_file_name("tempocue-schedule.tmpc")
+        .add_filter("TempoCue Schedule", &["tmpc"])
+        .save_file()
+        .await
+    else {
+        return Ok(None);
+    };
+    let mut path = file.path().to_path_buf();
+    if path.extension().and_then(|extension| extension.to_str()) != Some("tmpc") {
+        path.set_extension("tmpc");
+    }
+    state.export_schedule_file(&path).await?;
+    Ok(path.file_name().and_then(|name| name.to_str()).map(str::to_string))
+}
+
+#[tauri::command]
+pub async fn import_schedule_file(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let Some(file) = rfd::AsyncFileDialog::new()
+        .set_title("Import TempoCue schedule")
+        .add_filter("TempoCue Schedule", &["tmpc"])
+        .pick_file()
+        .await
+    else {
+        return Ok(None);
+    };
+    state.import_schedule_file(file.path()).await?;
+    Ok(file.file_name().into())
+}
+
+#[tauri::command]
 pub async fn set_blackout(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
     state.set_blackout(enabled).await;
     Ok(())

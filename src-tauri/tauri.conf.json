@@ -27,6 +27,20 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": []
+    "icon": [],
+    "fileAssociations": [
+      {
+        "ext": ["tmpc"],
+        "name": "TempoCue Schedule",
+        "description": "TempoCue encoded schedule",
+        "mimeType": "application/x-tempocue-schedule",
+        "role": "Editor",
+        "rank": "Owner",
+        "exportedType": {
+          "identifier": "com.tempocue.app.schedule",
+          "conformsTo": ["public.data"]
+        }
+      }
+    ]
   }
 }

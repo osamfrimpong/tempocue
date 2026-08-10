@@ -78,6 +78,9 @@ type StoreState = Snapshot & {
   createRundownItem: (item: { title: string; speaker: string; durationMs: number; timingMode: RundownTimingMode; endTime: string | null; notes: string; supportingFiles: string[] }) => Promise<void>;
   updateRundownItem: (item: { id: string; title: string; speaker: string; durationMs: number; timingMode: RundownTimingMode; endTime: string | null; notes: string; supportingFiles: string[] }) => Promise<void>;
   deleteRundownItem: (itemId: string) => Promise<void>;
+  replaceRundown: (rundown: RundownItem[]) => Promise<void>;
+  exportScheduleFile: () => Promise<string | null>;
+  importScheduleFile: () => Promise<string | null>;
   startTimer: () => Promise<void>;
   pauseTimer: () => Promise<void>;
   resetTimer: () => Promise<void>;
@@ -137,6 +140,7 @@ type ClientCommand =
       };
     }
   | { type: "rundown/delete-item"; payload: { itemId: string } }
+  | { type: "rundown/replace"; payload: { rundown: RundownItem[] } }
   | { type: "output/blackout"; payload: { enabled: boolean } }
   | { type: "output/hide-timer"; payload: { enabled: boolean } }
   | { type: "output/live"; payload: { enabled: boolean } }
@@ -218,6 +222,21 @@ export const useTempoCueStore = create<StoreState>((set) => ({
   deleteRundownItem: async (itemId: string) => {
     if (canInvoke) return invoke("delete_rundown_item", { itemId });
     return sendRemoteCommand({ type: "rundown/delete-item", payload: { itemId } });
+  },
+
+  replaceRundown: async (rundown: RundownItem[]) => {
+    if (canInvoke) return invoke("replace_rundown", { rundown });
+    return sendRemoteCommand({ type: "rundown/replace", payload: { rundown } });
+  },
+
+  exportScheduleFile: async () => {
+    if (!canInvoke) throw new Error("Schedule export is available in the TempoCue desktop app");
+    return invoke<string | null>("export_schedule_file");
+  },
+
+  importScheduleFile: async () => {
+    if (!canInvoke) throw new Error("Schedule import is available in the TempoCue desktop app");
+    return invoke<string | null>("import_schedule_file");
   },
 
   startTimer: async () => {

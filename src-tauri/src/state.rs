@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 
@@ -7,11 +8,21 @@ use crate::timer::{TimerState, TimerStatus, DEFAULT_DURATION_MS};
 
 const DEFAULT_YELLOW_THRESHOLD_MS: i64 = 5 * 60 * 1000;
 const DEFAULT_RED_THRESHOLD_MS: i64 = 60 * 1000;
+const PORTABLE_SCHEDULE_MAGIC: &[u8] = b"TEMPOCUE\0\x01";
 
 #[derive(Clone)]
 pub struct AppState {
     inner: Arc<RwLock<InnerState>>,
     tx: broadcast::Sender<RealtimeEvent>,
+    persistence_path: Arc<RwLock<Option<PathBuf>>>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedSchedule {
+    version: u32,
+    rundown: Vec<RundownItem>,
+    active_item_id: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -205,11 +216,110 @@ impl Default for AppState {
                 urls: urls_for_host_port(None, 4310),
             })),
             tx,
+            persistence_path: Arc::new(RwLock::new(None)),
         }
     }
 }
 
 impl AppState {
+    pub async fn export_schedule_file(&self, path: &std::path::Path) -> Result<(), String> {
+        let saved = {
+            let state = self.inner.read().await;
+            PersistedSchedule {
+                version: 1,
+                rundown: state.rundown.clone(),
+                active_item_id: state.output.active_item_id.clone(),
+            }
+        };
+        let payload = serde_json::to_vec(&saved).map_err(|error| format!("Could not encode schedule: {error}"))?;
+        let mut encoded = Vec::with_capacity(PORTABLE_SCHEDULE_MAGIC.len() + payload.len());
+        encoded.extend_from_slice(PORTABLE_SCHEDULE_MAGIC);
+        encoded.extend_from_slice(&payload);
+        tokio::fs::write(path, encoded)
+            .await
+            .map_err(|error| format!("Could not save schedule: {error}"))
+    }
+
+    pub async fn import_schedule_file(&self, path: &std::path::Path) -> Result<(), String> {
+        let encoded = tokio::fs::read(path)
+            .await
+            .map_err(|error| format!("Could not read schedule: {error}"))?;
+        let payload = encoded
+            .strip_prefix(PORTABLE_SCHEDULE_MAGIC)
+            .ok_or_else(|| "This is not a valid TempoCue schedule file".to_string())?;
+        let saved: PersistedSchedule = serde_json::from_slice(payload)
+            .map_err(|_| "This TempoCue schedule file is damaged or unsupported".to_string())?;
+        if saved.version != 1 {
+            return Err(format!("TempoCue schedule version {} is not supported", saved.version));
+        }
+        self.replace_rundown_with_active(saved.rundown, Some(saved.active_item_id)).await
+    }
+
+    pub async fn initialize_persistence(&self, path: PathBuf) {
+        {
+            let mut persistence_path = self.persistence_path.write().await;
+            *persistence_path = Some(path.clone());
+        }
+
+        let Ok(contents) = tokio::fs::read_to_string(&path).await else {
+            return;
+        };
+        let Ok(saved) = serde_json::from_str::<PersistedSchedule>(&contents) else {
+            eprintln!("failed to parse saved schedule at {}", path.display());
+            return;
+        };
+        if saved.version != 1 || saved.rundown.is_empty() {
+            return;
+        }
+
+        let active_item_id = if saved.rundown.iter().any(|item| item.id == saved.active_item_id) {
+            saved.active_item_id
+        } else {
+            saved.rundown[0].id.clone()
+        };
+        let active_item = saved.rundown.iter().find(|item| item.id == active_item_id).unwrap();
+        let timer = timer_for_rundown_item(active_item);
+        let mut timers_by_item = HashMap::new();
+        timers_by_item.insert(active_item_id.clone(), timer.clone());
+
+        let mut state = self.inner.write().await;
+        state.rundown = saved.rundown;
+        state.output.active_item_id = active_item_id;
+        state.timer = timer;
+        state.timers_by_item = timers_by_item;
+    }
+
+    async fn persist_schedule(&self) {
+        let Some(path) = self.persistence_path.read().await.clone() else {
+            return;
+        };
+        let saved = {
+            let state = self.inner.read().await;
+            PersistedSchedule {
+                version: 1,
+                rundown: state.rundown.clone(),
+                active_item_id: state.output.active_item_id.clone(),
+            }
+        };
+        let Ok(contents) = serde_json::to_vec_pretty(&saved) else {
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            if let Err(error) = tokio::fs::create_dir_all(parent).await {
+                eprintln!("failed to create schedule data directory: {error}");
+                return;
+            }
+        }
+        let temporary_path = path.with_extension("json.tmp");
+        if let Err(error) = tokio::fs::write(&temporary_path, contents).await {
+            eprintln!("failed to save schedule: {error}");
+            return;
+        }
+        if let Err(error) = tokio::fs::rename(&temporary_path, &path).await {
+            eprintln!("failed to finish saving schedule: {error}");
+        }
+    }
+
     pub fn subscribe(&self) -> broadcast::Receiver<RealtimeEvent> {
         self.tx.subscribe()
     }
@@ -290,8 +400,12 @@ impl AppState {
         };
 
         self.broadcast(RealtimeEvent::TimerState(timer.clone()));
+        let schedule_changed = items.is_some();
         if let Some(items) = items {
             self.broadcast(RealtimeEvent::RundownItems(items));
+        }
+        if schedule_changed {
+            self.persist_schedule().await;
         }
         timer
     }
@@ -324,8 +438,12 @@ impl AppState {
         };
 
         self.broadcast(RealtimeEvent::TimerState(timer.clone()));
+        let schedule_changed = items.is_some();
         if let Some(items) = items {
             self.broadcast(RealtimeEvent::RundownItems(items));
+        }
+        if schedule_changed {
+            self.persist_schedule().await;
         }
         timer
     }
@@ -376,6 +494,7 @@ impl AppState {
         };
         self.broadcast(RealtimeEvent::ActiveItem { item_id });
         self.broadcast(RealtimeEvent::TimerState(timer));
+        self.persist_schedule().await;
     }
 
     pub async fn create_item(
@@ -410,6 +529,7 @@ impl AppState {
             (item, state.rundown.clone())
         };
         self.broadcast(RealtimeEvent::RundownItems(items));
+        self.persist_schedule().await;
         item
     }
 
@@ -460,6 +580,7 @@ impl AppState {
         if let Some(timer) = timer {
             self.broadcast(RealtimeEvent::TimerState(timer));
         }
+        self.persist_schedule().await;
         Some(updated)
     }
 
@@ -511,7 +632,66 @@ impl AppState {
         if let Some(timer) = result.2 {
             self.broadcast(RealtimeEvent::TimerState(timer));
         }
+        self.persist_schedule().await;
         true
+    }
+
+    pub async fn replace_rundown(&self, rundown: Vec<RundownItem>) -> Result<(), String> {
+        self.replace_rundown_with_active(rundown, None).await
+    }
+
+    async fn replace_rundown_with_active(
+        &self,
+        rundown: Vec<RundownItem>,
+        requested_active_item_id: Option<String>,
+    ) -> Result<(), String> {
+        if rundown.is_empty() {
+            return Err("A schedule must contain at least one item".to_string());
+        }
+
+        let mut seen_ids = std::collections::HashSet::new();
+        let mut normalized = Vec::with_capacity(rundown.len());
+        for (index, mut item) in rundown.into_iter().enumerate() {
+            item.title = item.title.trim().to_string();
+            if item.title.is_empty() {
+                return Err(format!("Schedule item {} is missing a title", index + 1));
+            }
+            if item.id.trim().is_empty() || !seen_ids.insert(item.id.clone()) {
+                item.id = uuid::Uuid::new_v4().to_string();
+                seen_ids.insert(item.id.clone());
+            }
+            item.duration_ms = item.duration_ms.max(0);
+            item.end_time = clean_end_time(item.end_time);
+            item.supporting_files = item
+                .supporting_files
+                .into_iter()
+                .map(|file| file.trim().to_string())
+                .filter(|file| !file.is_empty())
+                .collect();
+            if item.color.trim().is_empty() {
+                item.color = next_item_color(index);
+            }
+            normalized.push(item);
+        }
+
+        let active_item_id = requested_active_item_id
+            .filter(|id| normalized.iter().any(|item| item.id == *id))
+            .unwrap_or_else(|| normalized[0].id.clone());
+        let active_item = normalized.iter().find(|item| item.id == active_item_id).unwrap();
+        let timer = timer_for_rundown_item(active_item);
+        {
+            let mut state = self.inner.write().await;
+            state.rundown = normalized.clone();
+            state.output.active_item_id = active_item_id.clone();
+            state.timer = timer.clone();
+            state.timers_by_item.clear();
+            state.timers_by_item.insert(active_item_id.clone(), timer.clone());
+        }
+        self.broadcast(RealtimeEvent::RundownItems(normalized));
+        self.broadcast(RealtimeEvent::ActiveItem { item_id: active_item_id });
+        self.broadcast(RealtimeEvent::TimerState(timer));
+        self.persist_schedule().await;
+        Ok(())
     }
 
     pub async fn skip_item(&self) {
@@ -715,4 +895,52 @@ fn default_rundown() -> Vec<RundownItem> {
             completed: false,
         },
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn portable_schedule_round_trip_preserves_items_and_active_item() {
+        let source = AppState::default();
+        let added = source
+            .create_item(
+                "Keynote".to_string(),
+                "Speaker".to_string(),
+                20 * 60 * 1000,
+                RundownTimingMode::Duration,
+                None,
+                "Notes".to_string(),
+                vec![],
+            )
+            .await;
+        source.select_item(added.id.clone()).await;
+
+        let path = std::env::temp_dir().join(format!("tempocue-test-{}.tmpc", uuid::Uuid::new_v4()));
+        source.export_schedule_file(&path).await.unwrap();
+        let encoded = tokio::fs::read(&path).await.unwrap();
+        assert!(encoded.starts_with(PORTABLE_SCHEDULE_MAGIC));
+
+        let restored = AppState::default();
+        restored.import_schedule_file(&path).await.unwrap();
+        let snapshot = restored.snapshot().await;
+        assert_eq!(snapshot.rundown.len(), 2);
+        assert_eq!(snapshot.output.active_item_id, added.id);
+        assert_eq!(snapshot.rundown[1].title, "Keynote");
+
+        let _ = tokio::fs::remove_file(path).await;
+    }
+
+    #[tokio::test]
+    async fn portable_schedule_rejects_unencoded_json() {
+        let path = std::env::temp_dir().join(format!("tempocue-test-{}.tmpc", uuid::Uuid::new_v4()));
+        tokio::fs::write(&path, br#"{"version":1}"#).await.unwrap();
+
+        let state = AppState::default();
+        let error = state.import_schedule_file(&path).await.unwrap_err();
+        assert!(error.contains("not a valid TempoCue schedule"));
+
+        let _ = tokio::fs::remove_file(path).await;
+    }
 }
