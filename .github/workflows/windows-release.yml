@@ -47,6 +47,9 @@ jobs:
           restore-keys: |
             windows-cargo-${{ runner.os }}-
 
+      - name: Fetch Rust dependencies
+        run: cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+
       - name: Install frontend dependencies
         run: npm ci
 
@@ -99,6 +102,9 @@ jobs:
           key: ${{ matrix.cache-prefix }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src-tauri/Cargo.lock') }}
           restore-keys: |
             ${{ matrix.cache-prefix }}-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Fetch Rust dependencies
+        run: cargo fetch --locked --manifest-path src-tauri/Cargo.toml
 
       - name: Install frontend dependencies
         run: npm ci

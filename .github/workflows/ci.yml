@@ -45,6 +45,9 @@ jobs:
           restore-keys: |
             macos-cargo-${{ runner.os }}-
 
+      - name: Fetch Rust dependencies
+        run: cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+
       - name: Install frontend dependencies
         run: npm ci
 
