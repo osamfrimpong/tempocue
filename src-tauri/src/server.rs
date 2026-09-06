@@ -346,6 +346,11 @@ enum ClientCommand {
         #[serde(rename = "itemId")]
         item_id: String,
     },
+    #[serde(rename = "rundown/reorder")]
+    ReorderRundown {
+        #[serde(rename = "itemIds")]
+        item_ids: Vec<String>,
+    },
     #[serde(rename = "rundown/replace")]
     ReplaceRundown { rundown: Vec<RundownItem> },
     #[serde(rename = "output/blackout")]
@@ -449,6 +454,9 @@ async fn apply_client_command(state: &AppState, command: ClientCommand) {
         }
         ClientCommand::DeleteItem { item_id } => {
             state.delete_item(item_id).await;
+        }
+        ClientCommand::ReorderRundown { item_ids } => {
+            let _ = state.reorder_rundown(item_ids).await;
         }
         ClientCommand::ReplaceRundown { rundown } => {
             let _ = state.replace_rundown(rundown).await;
@@ -565,6 +573,26 @@ mod tests {
                 assert_eq!(settings.red_threshold_ms, 60000);
             }
             _ => panic!("expected settings/timer-colors command"),
+        }
+    }
+
+    #[test]
+    fn deserializes_browser_rundown_reorder_command() {
+        let payload = r#"{
+            "type": "rundown/reorder",
+            "payload": {
+                "itemIds": ["item-2", "item-1"]
+            }
+        }"#;
+
+        let command = serde_json::from_str::<ClientCommand>(payload)
+            .expect("rundown/reorder should parse");
+
+        match command {
+            ClientCommand::ReorderRundown { item_ids } => {
+                assert_eq!(item_ids, vec!["item-2", "item-1"]);
+            }
+            _ => panic!("expected rundown/reorder command"),
         }
     }
 }

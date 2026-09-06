@@ -12,6 +12,7 @@ import {
   ExternalLink,
   EyeOff,
   FileText,
+  GripVertical,
   Heart,
   Image,
   Italic,
@@ -47,6 +48,8 @@ import type { OutputMessage, OutputMessageTextStyle, RundownItem } from "../../t
 
 type ItemDialogMode = "create" | "edit";
 type ItemTimingMode = "duration" | "end-time";
+type RundownDropPosition = "before" | "after";
+type RundownDropTarget = { itemId: string; position: RundownDropPosition };
 
 export function Controller() {
   const timer = useTempoCueStore((state) => state.timer);
@@ -66,6 +69,7 @@ export function Controller() {
   const createRundownItem = useTempoCueStore((state) => state.createRundownItem);
   const updateRundownItem = useTempoCueStore((state) => state.updateRundownItem);
   const deleteRundownItem = useTempoCueStore((state) => state.deleteRundownItem);
+  const reorderRundown = useTempoCueStore((state) => state.reorderRundown);
   const exportScheduleFile = useTempoCueStore((state) => state.exportScheduleFile);
   const importScheduleFile = useTempoCueStore((state) => state.importScheduleFile);
   const setBlackout = useTempoCueStore((state) => state.setBlackout);
@@ -89,6 +93,10 @@ export function Controller() {
   const previousNetworkHost = useRef<string | null>(null);
   const [networkChanged, setNetworkChanged] = useState(false);
   const [scheduleNotice, setScheduleNotice] = useState<string | null>(null);
+  const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<RundownDropTarget | null>(null);
+  const draggedItemIdRef = useRef<string | null>(null);
+  const dropTargetRef = useRef<RundownDropTarget | null>(null);
 
   useKeyboardShortcuts();
 
@@ -236,6 +244,118 @@ export function Controller() {
     setActivationCandidate(null);
   };
 
+  const clearRundownDrag = () => {
+    draggedItemIdRef.current = null;
+    dropTargetRef.current = null;
+    setDraggedItemId(null);
+    setDropTarget(null);
+  };
+
+  const setRundownDropTarget = (target: RundownDropTarget | null) => {
+    const current = dropTargetRef.current;
+    if (current?.itemId === target?.itemId && current?.position === target?.position) return;
+    dropTargetRef.current = target;
+    setDropTarget(target);
+  };
+
+  const updateDropTarget = (clientX: number, clientY: number) => {
+    const sourceId = draggedItemIdRef.current;
+    if (!sourceId) return;
+
+    const element = document.elementFromPoint(clientX, clientY);
+    const rowElement = element?.closest<HTMLElement>("[data-rundown-item-id]");
+    const targetId = rowElement?.dataset.rundownItemId;
+    if (rowElement && targetId && targetId !== sourceId) {
+      const rect = rowElement.getBoundingClientRect();
+      setRundownDropTarget({
+        itemId: targetId,
+        position: clientY < rect.top + rect.height / 2 ? "before" : "after",
+      });
+      return;
+    }
+
+    if (targetId === sourceId) {
+      setRundownDropTarget(null);
+      return;
+    }
+
+    const listElement = element?.closest<HTMLElement>("[data-rundown-list]");
+    if (!listElement) {
+      setRundownDropTarget(null);
+      return;
+    }
+
+    const rows = Array.from(listElement.querySelectorAll<HTMLElement>("[data-rundown-item-id]"));
+    const nextRow = rows.find((row) => {
+      const rect = row.getBoundingClientRect();
+      return clientY < rect.top + rect.height / 2;
+    });
+    const blankSpaceTargetId = nextRow?.dataset.rundownItemId ?? rows.at(-1)?.dataset.rundownItemId;
+    if (!blankSpaceTargetId) {
+      setRundownDropTarget(null);
+      return;
+    }
+
+    const target = {
+      itemId: blankSpaceTargetId,
+      position: nextRow ? "before" as const : "after" as const,
+    };
+    setRundownDropTarget(target.itemId === sourceId ? null : target);
+  };
+
+  const commitRundownDrop = (sourceId = draggedItemIdRef.current) => {
+    const target = dropTargetRef.current;
+    if (!sourceId || !target) return;
+    const newIds = moveRundownItem(rundown, sourceId, target.itemId, target.position);
+    if (newIds) void reorderRundown(newIds);
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>, itemId: string) => {
+    if (rundown.length <= 1 || e.button !== 0) return;
+    e.preventDefault();
+    setRundownDropTarget(null);
+    draggedItemIdRef.current = itemId;
+    setDraggedItemId(itemId);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!draggedItemIdRef.current) return;
+    if (e.cancelable) e.preventDefault();
+    updateDropTarget(e.clientX, e.clientY);
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!draggedItemIdRef.current) return;
+    updateDropTarget(e.clientX, e.clientY);
+    commitRundownDrop();
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    clearRundownDrag();
+  };
+
+  const handleKeyDownReorder = (e: React.KeyboardEvent, currentIndex: number) => {
+    if (rundown.length <= 1) return;
+    if (e.key === "ArrowUp" && currentIndex > 0) {
+      e.preventDefault();
+      const currentItem = rundown[currentIndex];
+      const targetItem = rundown[currentIndex - 1];
+      if (currentItem && targetItem) {
+        const newIds = moveRundownItem(rundown, currentItem.id, targetItem.id, "before");
+        if (newIds) void reorderRundown(newIds);
+      }
+    } else if (e.key === "ArrowDown" && currentIndex < rundown.length - 1) {
+      e.preventDefault();
+      const currentItem = rundown[currentIndex];
+      const targetItem = rundown[currentIndex + 1];
+      if (currentItem && targetItem) {
+        const newIds = moveRundownItem(rundown, currentItem.id, targetItem.id, "after");
+        if (newIds) void reorderRundown(newIds);
+      }
+    }
+  };
+
   const openTimePickerFromField = (event: MouseEvent<HTMLDivElement> | TouchEvent<HTMLDivElement>) => {
     if (!(event.target instanceof HTMLInputElement)) return;
     const button = event.currentTarget.querySelector<HTMLButtonElement>('[data-testid="time-button"]');
@@ -317,18 +437,56 @@ export function Controller() {
             </div>
          
           </div>
-          <div className="grid max-h-80 min-h-0 flex-1 content-start gap-2 overflow-y-auto p-3 lg:max-h-none">
+          <div
+            data-rundown-list
+            className="grid max-h-80 min-h-0 flex-1 content-start gap-2 overflow-y-auto p-3 lg:max-h-none"
+          >
             {rundown.map((item, index) => {
               const isActiveItem = item.id === output.activeItemId;
               const activeItemActionDisabled = timerIsRunning && isActiveItem;
+              const isBeingDragged = draggedItemId === item.id;
+              const isDropTarget = dropTarget?.itemId === item.id && !isBeingDragged;
 
               return (
                 <div
                   key={item.id}
-                  className={`grid grid-cols-[6px_1fr_auto] items-center gap-3 rounded-md border p-3 transition-colors ${
-                    isActiveItem ? "border-primary bg-primary/10" : "border-border bg-background hover:bg-accent"
+                  data-rundown-item-id={item.id}
+                  className={`group relative grid grid-cols-[auto_6px_1fr_auto] items-center gap-2.5 rounded-md border p-3 transition-all ${
+                    isBeingDragged ? "opacity-35 border-dashed border-primary" : ""
+                  } ${
+                    isDropTarget ? "border-primary ring-2 ring-primary/80 bg-primary/15 shadow-sm" : ""
+                  } ${
+                    !isDropTarget && isActiveItem ? "border-primary bg-primary/10" : ""
+                  } ${
+                    !isDropTarget && !isActiveItem ? "border-border bg-background hover:bg-accent" : ""
                   }`}
                 >
+                  {isDropTarget && (
+                    <div
+                      className={`pointer-events-none absolute left-0 right-0 z-20 h-1 rounded-full bg-primary shadow-[0_0_8px_hsl(var(--primary))] ${
+                        dropTarget.position === "before" ? "-top-1" : "-bottom-1"
+                      }`}
+                    />
+                  )}
+                  <div
+                    role="button"
+                    tabIndex={rundown.length > 1 ? 0 : -1}
+                    aria-label={`Reorder ${item.title}. Drag or press up/down arrow keys to change order.`}
+                    title={rundown.length > 1 ? "Drag to reorder (or use arrow keys)" : undefined}
+                    className={`flex h-8 w-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors touch-none select-none ${
+                      rundown.length > 1
+                        ? "cursor-grab hover:bg-accent hover:text-foreground focus:outline-none focus:ring-1 focus:ring-ring active:cursor-grabbing"
+                        : "cursor-default opacity-40"
+                    }`}
+                    onKeyDown={(e) => handleKeyDownReorder(e, index)}
+                    onPointerDown={(e) => handlePointerDown(e, item.id)}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={handlePointerUp}
+                    onPointerCancel={clearRundownDrag}
+                    onLostPointerCapture={clearRundownDrag}
+                  >
+                    <GripVertical className="h-4 w-4" />
+                  </div>
                   <span className="h-full min-h-14 rounded-full" style={{ backgroundColor: item.color }} />
                   <div className="min-w-0 text-left">
                     <span className="block text-sm text-muted-foreground">{String(index + 1).padStart(2, "0")}</span>
@@ -901,4 +1059,25 @@ function UrlRow({ label, value, disabled }: { label: string; value: string; disa
       </Button>
     </div>
   );
+}
+
+function moveRundownItem(
+  rundown: RundownItem[],
+  sourceId: string,
+  targetId: string,
+  position: RundownDropPosition,
+): string[] | null {
+  if (sourceId === targetId) return null;
+  const sourceIndex = rundown.findIndex((i) => i.id === sourceId);
+  const targetIndex = rundown.findIndex((i) => i.id === targetId);
+  if (sourceIndex === -1 || targetIndex === -1) return null;
+
+  const newRundown = [...rundown];
+  const [moved] = newRundown.splice(sourceIndex, 1);
+  let insertionIndex = targetIndex + (position === "after" ? 1 : 0);
+  if (sourceIndex < insertionIndex) insertionIndex -= 1;
+  newRundown.splice(insertionIndex, 0, moved);
+
+  const newIds = newRundown.map((i) => i.id);
+  return newIds.every((id, index) => id === rundown[index]?.id) ? null : newIds;
 }

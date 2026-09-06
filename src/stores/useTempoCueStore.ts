@@ -78,6 +78,7 @@ type StoreState = Snapshot & {
   createRundownItem: (item: { title: string; speaker: string; durationMs: number; timingMode: RundownTimingMode; endTime: string | null; notes: string; supportingFiles: string[] }) => Promise<void>;
   updateRundownItem: (item: { id: string; title: string; speaker: string; durationMs: number; timingMode: RundownTimingMode; endTime: string | null; notes: string; supportingFiles: string[] }) => Promise<void>;
   deleteRundownItem: (itemId: string) => Promise<void>;
+  reorderRundown: (itemIds: string[]) => Promise<void>;
   replaceRundown: (rundown: RundownItem[]) => Promise<void>;
   exportScheduleFile: () => Promise<string | null>;
   importScheduleFile: () => Promise<string | null>;
@@ -140,6 +141,7 @@ type ClientCommand =
       };
     }
   | { type: "rundown/delete-item"; payload: { itemId: string } }
+  | { type: "rundown/reorder"; payload: { itemIds: string[] } }
   | { type: "rundown/replace"; payload: { rundown: RundownItem[] } }
   | { type: "output/blackout"; payload: { enabled: boolean } }
   | { type: "output/hide-timer"; payload: { enabled: boolean } }
@@ -222,6 +224,31 @@ export const useTempoCueStore = create<StoreState>((set) => ({
   deleteRundownItem: async (itemId: string) => {
     if (canInvoke) return invoke("delete_rundown_item", { itemId });
     return sendRemoteCommand({ type: "rundown/delete-item", payload: { itemId } });
+  },
+
+  reorderRundown: async (itemIds: string[]) => {
+    set((state) => {
+      if (itemIds.length !== state.rundown.length) return {};
+      const idMap = new Map(state.rundown.map((item) => [item.id, item]));
+      const seen = new Set<string>();
+      const reordered: RundownItem[] = [];
+      for (const id of itemIds) {
+        const item = idMap.get(id);
+        if (!item || seen.has(id)) return {};
+        seen.add(id);
+        reordered.push(item);
+      }
+      return { rundown: reordered };
+    });
+
+    try {
+      if (canInvoke) {
+        return await invoke("reorder_rundown", { itemIds });
+      }
+      return await sendRemoteCommand({ type: "rundown/reorder", payload: { itemIds } });
+    } catch (error) {
+      console.error("[TempoCue] Failed to reorder rundown:", error);
+    }
   },
 
   replaceRundown: async (rundown: RundownItem[]) => {

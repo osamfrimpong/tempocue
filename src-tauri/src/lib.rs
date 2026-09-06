@@ -5,7 +5,7 @@ mod timer;
 
 use commands::{
     add_time, create_rundown_item, delete_rundown_item, export_schedule_file, get_snapshot, hide_message,
-    import_schedule_file, pause_timer, replace_rundown, reset_timer, select_rundown_item, set_blackout,
+    import_schedule_file, pause_timer, reorder_rundown, replace_rundown, reset_timer, select_rundown_item, set_blackout,
     set_hide_timer, set_live, set_timer_color_settings, set_timer_duration, set_timer_end_time,
     set_timer_remaining, show_message, skip_timer, start_timer, update_message_draft, update_rundown_item,
 };
@@ -66,6 +66,7 @@ pub fn run() {
             create_rundown_item,
             update_rundown_item,
             delete_rundown_item,
+            reorder_rundown,
             replace_rundown,
             export_schedule_file,
             import_schedule_file,

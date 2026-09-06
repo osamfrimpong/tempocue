@@ -636,6 +636,38 @@ impl AppState {
         true
     }
 
+    pub async fn reorder_rundown(&self, item_ids: Vec<String>) -> Result<(), String> {
+        let items = {
+            let mut state = self.inner.write().await;
+            if item_ids.len() != state.rundown.len() {
+                return Err("Item count mismatch".to_string());
+            }
+
+            let mut current_items: std::collections::HashMap<String, RundownItem> = state
+                .rundown
+                .iter()
+                .cloned()
+                .map(|item| (item.id.clone(), item))
+                .collect();
+
+            let mut reordered = Vec::with_capacity(item_ids.len());
+            for id in &item_ids {
+                if let Some(item) = current_items.remove(id) {
+                    reordered.push(item);
+                } else {
+                    return Err(format!("Invalid schedule item id: {id}"));
+                }
+            }
+
+            state.rundown = reordered.clone();
+            reordered
+        };
+
+        self.broadcast(RealtimeEvent::RundownItems(items));
+        self.persist_schedule().await;
+        Ok(())
+    }
+
     pub async fn replace_rundown(&self, rundown: Vec<RundownItem>) -> Result<(), String> {
         self.replace_rundown_with_active(rundown, None).await
     }
@@ -942,5 +974,121 @@ mod tests {
         assert!(error.contains("not a valid TempoCue schedule"));
 
         let _ = tokio::fs::remove_file(path).await;
+    }
+
+    #[tokio::test]
+    async fn reorder_rundown_updates_order_and_preserves_active_item() {
+        let state = AppState::default();
+        let second = state
+            .create_item(
+                "Second Item".to_string(),
+                "Speaker 2".to_string(),
+                15 * 60 * 1000,
+                RundownTimingMode::Duration,
+                None,
+                "".to_string(),
+                vec![],
+            )
+            .await;
+        let third = state
+            .create_item(
+                "Third Item".to_string(),
+                "Speaker 3".to_string(),
+                10 * 60 * 1000,
+                RundownTimingMode::Duration,
+                None,
+                "".to_string(),
+                vec![],
+            )
+            .await;
+
+        let snapshot = state.snapshot().await;
+        assert_eq!(snapshot.rundown.len(), 3);
+        let first_id = snapshot.rundown[0].id.clone();
+        assert_eq!(snapshot.output.active_item_id, first_id);
+
+        // Reorder to: [third, first, second]
+        state
+            .reorder_rundown(vec![third.id.clone(), first_id.clone(), second.id.clone()])
+            .await
+            .unwrap();
+
+        let updated = state.snapshot().await;
+        assert_eq!(updated.rundown[0].id, third.id);
+        assert_eq!(updated.rundown[1].id, first_id);
+        assert_eq!(updated.rundown[2].id, second.id);
+        // Active item should remain unchanged
+        assert_eq!(updated.output.active_item_id, first_id);
+    }
+
+    #[tokio::test]
+    async fn reorder_rundown_validates_ids_and_count() {
+        let state = AppState::default();
+        let added = state
+            .create_item(
+                "Second Item".to_string(),
+                "Speaker 2".to_string(),
+                15 * 60 * 1000,
+                RundownTimingMode::Duration,
+                None,
+                "".to_string(),
+                vec![],
+            )
+            .await;
+        let original_ids: Vec<String> = state
+            .snapshot()
+            .await
+            .rundown
+            .into_iter()
+            .map(|item| item.id)
+            .collect();
+
+        // Mismatch count
+        let err = state.reorder_rundown(vec![added.id.clone()]).await.unwrap_err();
+        assert!(err.contains("Item count mismatch"));
+        assert_eq!(
+            state
+                .snapshot()
+                .await
+                .rundown
+                .into_iter()
+                .map(|item| item.id)
+                .collect::<Vec<_>>(),
+            original_ids
+        );
+
+        // Invalid ID
+        let err = state
+            .reorder_rundown(vec!["fake-id".to_string(), added.id.clone()])
+            .await
+            .unwrap_err();
+        assert!(err.contains("Invalid schedule item id"));
+        assert_eq!(
+            state
+                .snapshot()
+                .await
+                .rundown
+                .into_iter()
+                .map(|item| item.id)
+                .collect::<Vec<_>>(),
+            original_ids
+        );
+
+        // Duplicate IDs must not mutate the schedule either.
+        let err = state
+            .reorder_rundown(vec![added.id.clone(), added.id.clone()])
+            .await
+            .unwrap_err();
+        assert!(err.contains("Invalid schedule item id"));
+        assert_eq!(
+            state
+                .snapshot()
+                .await
+                .rundown
+                .into_iter()
+                .map(|item| item.id)
+                .collect::<Vec<_>>(),
+            original_ids
+        );
     }
 }

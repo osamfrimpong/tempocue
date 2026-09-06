@@ -141,6 +141,11 @@ pub async fn delete_rundown_item(item_id: String, state: State<'_, AppState>) ->
     }
 }
 
+#[tauri::command(rename_all = "camelCase")]
+pub async fn reorder_rundown(item_ids: Vec<String>, state: State<'_, AppState>) -> Result<(), String> {
+    state.reorder_rundown(item_ids).await
+}
+
 #[tauri::command]
 pub async fn replace_rundown(rundown: Vec<RundownItem>, state: State<'_, AppState>) -> Result<(), String> {
     state.replace_rundown(rundown).await
