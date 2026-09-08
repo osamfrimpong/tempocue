@@ -115,6 +115,16 @@ export function Controller() {
     () => rundown.findIndex((item) => item.id === output.activeItemId),
     [output.activeItemId, rundown],
   );
+  const displayedRundown = useMemo(() => {
+    if (!draggedItemId || !dropTarget) return rundown;
+    const itemIds = moveRundownItem(rundown, draggedItemId, dropTarget.itemId, dropTarget.position);
+    if (!itemIds) return rundown;
+    const itemsById = new Map(rundown.map((item) => [item.id, item]));
+    return itemIds.flatMap((itemId) => {
+      const item = itemsById.get(itemId);
+      return item ? [item] : [];
+    });
+  }, [draggedItemId, dropTarget, rundown]);
   const active = rundown[activeIndex] ?? rundown[0];
   const next = rundown[activeIndex + 1];
   const timerIsRunning = timer.status === "running";
@@ -274,10 +284,9 @@ export function Controller() {
       return;
     }
 
-    if (targetId === sourceId) {
-      setRundownDropTarget(null);
-      return;
-    }
+    // Once the live preview moves the grabbed row under the pointer, keep the
+    // last insertion point until the pointer crosses another row.
+    if (targetId === sourceId) return;
 
     const listElement = element?.closest<HTMLElement>("[data-rundown-list]");
     if (!listElement) {
@@ -316,7 +325,11 @@ export function Controller() {
     setRundownDropTarget(null);
     draggedItemIdRef.current = itemId;
     setDraggedItemId(itemId);
-    e.currentTarget.setPointerCapture(e.pointerId);
+    // Capture on the stationary list rather than the grip. The preview moves
+    // the dragged row in the DOM, which can make WebKit revoke capture from a
+    // grip inside that row before pointerup is delivered.
+    const listElement = e.currentTarget.closest<HTMLElement>("[data-rundown-list]");
+    listElement?.setPointerCapture(e.pointerId);
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -435,13 +448,23 @@ export function Controller() {
                 Export
               </Button>
             </div>
+            {rundown.length > 1 && (
+              <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+                <GripVertical className="h-3.5 w-3.5" />
+                <span>Drag the grip to reorder · Arrow keys also work</span>
+              </div>
+            )}
          
           </div>
           <div
             data-rundown-list
             className="grid max-h-80 min-h-0 flex-1 content-start gap-2 overflow-y-auto p-3 lg:max-h-none"
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={clearRundownDrag}
+            onLostPointerCapture={clearRundownDrag}
           >
-            {rundown.map((item, index) => {
+            {displayedRundown.map((item, index) => {
               const isActiveItem = item.id === output.activeItemId;
               const activeItemActionDisabled = timerIsRunning && isActiveItem;
               const isBeingDragged = draggedItemId === item.id;
@@ -451,14 +474,14 @@ export function Controller() {
                 <div
                   key={item.id}
                   data-rundown-item-id={item.id}
-                  className={`group relative grid grid-cols-[auto_6px_1fr_auto] items-center gap-2.5 rounded-md border p-3 transition-all ${
-                    isBeingDragged ? "opacity-35 border-dashed border-primary" : ""
+                  className={`group relative grid grid-cols-[2rem_6px_1fr_auto] items-center gap-2.5 rounded-md border p-3 transition-all duration-150 ${
+                    isBeingDragged ? "z-10 scale-[1.02] border-primary bg-primary/15 shadow-xl" : ""
                   } ${
                     isDropTarget ? "border-primary ring-2 ring-primary/80 bg-primary/15 shadow-sm" : ""
                   } ${
-                    !isDropTarget && isActiveItem ? "border-primary bg-primary/10" : ""
+                    !isDropTarget && !isBeingDragged && isActiveItem ? "border-primary bg-primary/10" : ""
                   } ${
-                    !isDropTarget && !isActiveItem ? "border-border bg-background hover:bg-accent" : ""
+                    !isDropTarget && !isBeingDragged && !isActiveItem ? "border-border bg-background hover:bg-accent" : ""
                   }`}
                 >
                   {isDropTarget && (
@@ -473,17 +496,13 @@ export function Controller() {
                     tabIndex={rundown.length > 1 ? 0 : -1}
                     aria-label={`Reorder ${item.title}. Drag or press up/down arrow keys to change order.`}
                     title={rundown.length > 1 ? "Drag to reorder (or use arrow keys)" : undefined}
-                    className={`flex h-8 w-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors touch-none select-none ${
+                    className={`flex h-full min-h-14 w-8 shrink-0 items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors touch-none select-none ${
                       rundown.length > 1
-                        ? "cursor-grab hover:bg-accent hover:text-foreground focus:outline-none focus:ring-1 focus:ring-ring active:cursor-grabbing"
+                        ? "cursor-grab hover:border-border hover:bg-accent hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring active:cursor-grabbing"
                         : "cursor-default opacity-40"
                     }`}
                     onKeyDown={(e) => handleKeyDownReorder(e, index)}
                     onPointerDown={(e) => handlePointerDown(e, item.id)}
-                    onPointerMove={handlePointerMove}
-                    onPointerUp={handlePointerUp}
-                    onPointerCancel={clearRundownDrag}
-                    onLostPointerCapture={clearRundownDrag}
                   >
                     <GripVertical className="h-4 w-4" />
                   </div>
