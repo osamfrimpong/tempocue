@@ -52,6 +52,72 @@ body:has([class*="bg-transparent"]) {
   animation: message-flash 1.4s steps(2, jump-none) infinite;
 }
 
+.rundown-drop-gap {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition:
+    height 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 120ms ease;
+}
+
+.rundown-drop-gap--active {
+  opacity: 1;
+}
+
+.rundown-drop-line {
+  position: absolute;
+  inset-inline: 0.25rem;
+  top: 50%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: hsl(var(--primary));
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transform: translateY(-50%);
+}
+
+.rundown-drop-line::before,
+.rundown-drop-line::after {
+  height: 2px;
+  flex: 1;
+  border-radius: 999px;
+  background: hsl(var(--primary));
+  box-shadow: 0 0 10px hsl(var(--primary) / 0.45);
+  content: "";
+}
+
+.rundown-drag-preview {
+  position: fixed;
+  z-index: 70;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  border-color: hsl(var(--primary));
+  background: hsl(var(--card) / 0.96);
+  box-shadow:
+    0 18px 45px hsl(210 40% 2% / 0.52),
+    0 0 0 2px hsl(var(--primary) / 0.2);
+  opacity: 0.98;
+  will-change: transform;
+  animation: rundown-drag-lift 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  backdrop-filter: blur(10px);
+}
+
+.rundown-drag-preview--invalid {
+  border-color: hsl(var(--muted-foreground));
+  opacity: 0.62;
+  filter: saturate(0.5);
+}
+
+.rundown-item--dropped {
+  animation: rundown-drop-settle 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
 @keyframes message-flash {
   0%,
   100% {
@@ -60,6 +126,39 @@ body:has([class*="bg-transparent"]) {
 
   50% {
     opacity: 0;
+  }
+}
+
+@keyframes rundown-drag-lift {
+  from {
+    opacity: 0.72;
+    scale: 0.985;
+  }
+
+  to {
+    opacity: 0.98;
+    scale: 1;
+  }
+}
+
+@keyframes rundown-drop-settle {
+  0% {
+    box-shadow: 0 0 0 2px hsl(var(--primary) / 0.5);
+    transform: scale(1.015);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 hsl(var(--primary) / 0);
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rundown-drop-gap,
+  .rundown-drag-preview,
+  .rundown-item--dropped {
+    transition-duration: 0.01ms;
+    animation-duration: 0.01ms;
   }
 }
 

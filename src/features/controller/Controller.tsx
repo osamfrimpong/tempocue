@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent, type TouchEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent, type TouchEvent } from "react";
 import { Link } from "react-router-dom";
 import { TimePicker } from "@asphalt-react/time-picker";
 import {
@@ -48,8 +48,18 @@ import type { OutputMessage, OutputMessageTextStyle, RundownItem } from "../../t
 
 type ItemDialogMode = "create" | "edit";
 type ItemTimingMode = "duration" | "end-time";
-type RundownDropPosition = "before" | "after";
-type RundownDropTarget = { itemId: string; position: RundownDropPosition };
+type PendingRundownDrag = {
+  itemId: string;
+  pointerId: number;
+  pointerType: string;
+  startX: number;
+  startY: number;
+  offsetX: number;
+  offsetY: number;
+  width: number;
+  height: number;
+};
+type RundownDragState = PendingRundownDrag & { x: number; y: number };
 
 export function Controller() {
   const timer = useTempoCueStore((state) => state.timer);
@@ -94,9 +104,19 @@ export function Controller() {
   const [networkChanged, setNetworkChanged] = useState(false);
   const [scheduleNotice, setScheduleNotice] = useState<string | null>(null);
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
-  const [dropTarget, setDropTarget] = useState<RundownDropTarget | null>(null);
+  const [dragState, setDragState] = useState<RundownDragState | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const [dragAnnouncement, setDragAnnouncement] = useState("");
+  const [justDroppedItemId, setJustDroppedItemId] = useState<string | null>(null);
+  const rundownListRef = useRef<HTMLDivElement | null>(null);
+  const pendingDragRef = useRef<PendingRundownDrag | null>(null);
+  const dragStateRef = useRef<RundownDragState | null>(null);
   const draggedItemIdRef = useRef<string | null>(null);
-  const dropTargetRef = useRef<RundownDropTarget | null>(null);
+  const dropIndexRef = useRef<number | null>(null);
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const autoScrollFrameRef = useRef<number | null>(null);
+  const dropAnimationTimeoutRef = useRef<number | null>(null);
+  const cancelRundownDragRef = useRef<() => void>(() => undefined);
 
   useKeyboardShortcuts();
 
@@ -115,16 +135,13 @@ export function Controller() {
     () => rundown.findIndex((item) => item.id === output.activeItemId),
     [output.activeItemId, rundown],
   );
-  const displayedRundown = useMemo(() => {
-    if (!draggedItemId || !dropTarget) return rundown;
-    const itemIds = moveRundownItem(rundown, draggedItemId, dropTarget.itemId, dropTarget.position);
-    if (!itemIds) return rundown;
-    const itemsById = new Map(rundown.map((item) => [item.id, item]));
-    return itemIds.flatMap((itemId) => {
-      const item = itemsById.get(itemId);
-      return item ? [item] : [];
-    });
-  }, [draggedItemId, dropTarget, rundown]);
+  const displayedRundown = useMemo(
+    () => (draggedItemId ? rundown.filter((item) => item.id !== draggedItemId) : rundown),
+    [draggedItemId, rundown],
+  );
+  const draggedItem = draggedItemId ? rundown.find((item) => item.id === draggedItemId) ?? null : null;
+  const originalDragIndex = draggedItemId ? rundown.findIndex((item) => item.id === draggedItemId) : null;
+  const visibleDropIndex = dropIndex ?? originalDragIndex;
   const active = rundown[activeIndex] ?? rundown[0];
   const next = rundown[activeIndex + 1];
   const timerIsRunning = timer.status === "running";
@@ -254,120 +271,275 @@ export function Controller() {
     setActivationCandidate(null);
   };
 
-  const clearRundownDrag = () => {
-    draggedItemIdRef.current = null;
-    dropTargetRef.current = null;
-    setDraggedItemId(null);
-    setDropTarget(null);
-  };
-
-  const setRundownDropTarget = (target: RundownDropTarget | null) => {
-    const current = dropTargetRef.current;
-    if (current?.itemId === target?.itemId && current?.position === target?.position) return;
-    dropTargetRef.current = target;
-    setDropTarget(target);
-  };
-
-  const updateDropTarget = (clientX: number, clientY: number) => {
-    const sourceId = draggedItemIdRef.current;
-    if (!sourceId) return;
-
-    const element = document.elementFromPoint(clientX, clientY);
-    const rowElement = element?.closest<HTMLElement>("[data-rundown-item-id]");
-    const targetId = rowElement?.dataset.rundownItemId;
-    if (rowElement && targetId && targetId !== sourceId) {
-      const rect = rowElement.getBoundingClientRect();
-      setRundownDropTarget({
-        itemId: targetId,
-        position: clientY < rect.top + rect.height / 2 ? "before" : "after",
-      });
-      return;
+  const stopAutoScroll = () => {
+    if (autoScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(autoScrollFrameRef.current);
+      autoScrollFrameRef.current = null;
     }
+  };
 
-    // Once the live preview moves the grabbed row under the pointer, keep the
-    // last insertion point until the pointer crosses another row.
-    if (targetId === sourceId) return;
+  const setRundownDropIndex = (nextIndex: number | null) => {
+    if (dropIndexRef.current === nextIndex) return;
+    dropIndexRef.current = nextIndex;
+    setDropIndex(nextIndex);
 
-    const listElement = element?.closest<HTMLElement>("[data-rundown-list]");
-    if (!listElement) {
-      setRundownDropTarget(null);
+    const item = draggedItemIdRef.current
+      ? rundown.find((rundownItem) => rundownItem.id === draggedItemIdRef.current)
+      : null;
+    if (item && nextIndex !== null) {
+      setDragAnnouncement(`${item.title}, position ${nextIndex + 1} of ${rundown.length}`);
+    }
+  };
+
+  const clearRundownDrag = () => {
+    stopAutoScroll();
+    pendingDragRef.current = null;
+    dragStateRef.current = null;
+    draggedItemIdRef.current = null;
+    dropIndexRef.current = null;
+    lastPointerRef.current = null;
+    setDragState(null);
+    setDraggedItemId(null);
+    setDropIndex(null);
+  };
+
+  const cancelRundownDrag = () => {
+    const item = draggedItemIdRef.current
+      ? rundown.find((rundownItem) => rundownItem.id === draggedItemIdRef.current)
+      : null;
+    if (item) setDragAnnouncement(`Reordering ${item.title} cancelled`);
+    clearRundownDrag();
+  };
+  cancelRundownDragRef.current = cancelRundownDrag;
+
+  const markRundownItemDropped = (itemId: string) => {
+    if (dropAnimationTimeoutRef.current !== null) {
+      window.clearTimeout(dropAnimationTimeoutRef.current);
+    }
+    setJustDroppedItemId(itemId);
+    dropAnimationTimeoutRef.current = window.setTimeout(() => {
+      setJustDroppedItemId(null);
+      dropAnimationTimeoutRef.current = null;
+    }, 260);
+  };
+
+  const updateDropIndex = (clientX: number, clientY: number) => {
+    const listElement = rundownListRef.current;
+    if (!draggedItemIdRef.current || !listElement) return;
+
+    const listRect = listElement.getBoundingClientRect();
+    const outsideHorizontalBounds = clientX < listRect.left - 48 || clientX > listRect.right + 48;
+    const outsideVerticalBounds = clientY < listRect.top - 72 || clientY > listRect.bottom + 72;
+    if (outsideHorizontalBounds || outsideVerticalBounds) {
+      setRundownDropIndex(null);
       return;
     }
 
     const rows = Array.from(listElement.querySelectorAll<HTMLElement>("[data-rundown-item-id]"));
-    const nextRow = rows.find((row) => {
+    const nextRowIndex = rows.findIndex((row) => {
       const rect = row.getBoundingClientRect();
       return clientY < rect.top + rect.height / 2;
     });
-    const blankSpaceTargetId = nextRow?.dataset.rundownItemId ?? rows.at(-1)?.dataset.rundownItemId;
-    if (!blankSpaceTargetId) {
-      setRundownDropTarget(null);
+    setRundownDropIndex(nextRowIndex === -1 ? rows.length : nextRowIndex);
+  };
+
+  const runAutoScroll = () => {
+    autoScrollFrameRef.current = null;
+    const listElement = rundownListRef.current;
+    const pointer = lastPointerRef.current;
+    if (!listElement || !pointer || !draggedItemIdRef.current) return;
+
+    const rect = listElement.getBoundingClientRect();
+    if (
+      pointer.x < rect.left - 48 ||
+      pointer.x > rect.right + 48 ||
+      pointer.y < rect.top - 72 ||
+      pointer.y > rect.bottom + 72
+    ) {
       return;
     }
+    const edgeSize = Math.min(56, rect.height / 4);
+    let scrollDelta = 0;
+    if (pointer.y < rect.top + edgeSize) {
+      scrollDelta = -Math.ceil(((rect.top + edgeSize - pointer.y) / edgeSize) * 12);
+    } else if (pointer.y > rect.bottom - edgeSize) {
+      scrollDelta = Math.ceil(((pointer.y - (rect.bottom - edgeSize)) / edgeSize) * 12);
+    }
+    scrollDelta = Math.max(-16, Math.min(16, scrollDelta));
 
-    const target = {
-      itemId: blankSpaceTargetId,
-      position: nextRow ? "before" as const : "after" as const,
+    if (scrollDelta !== 0) {
+      const previousScrollTop = listElement.scrollTop;
+      listElement.scrollTop += scrollDelta;
+      if (listElement.scrollTop !== previousScrollTop) {
+        updateDropIndex(pointer.x, pointer.y);
+        autoScrollFrameRef.current = window.requestAnimationFrame(runAutoScroll);
+      }
+    }
+  };
+
+  const beginAutoScroll = () => {
+    if (autoScrollFrameRef.current === null) {
+      autoScrollFrameRef.current = window.requestAnimationFrame(runAutoScroll);
+    }
+  };
+
+  const commitRundownDrop = () => {
+    const sourceId = draggedItemIdRef.current;
+    const targetIndex = dropIndexRef.current;
+    if (!sourceId || targetIndex === null) return;
+    const newIds = moveRundownItemToIndex(rundown, sourceId, targetIndex);
+    const item = rundown.find((rundownItem) => rundownItem.id === sourceId);
+    if (newIds) {
+      void reorderRundown(newIds);
+      markRundownItemDropped(sourceId);
+      if (item) setDragAnnouncement(`${item.title} moved to position ${targetIndex + 1} of ${rundown.length}`);
+    } else if (item) {
+      setDragAnnouncement(`${item.title} remains at position ${targetIndex + 1} of ${rundown.length}`);
+    }
+  };
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>, itemId: string) => {
+    if (rundown.length <= 1 || event.button !== 0 || pendingDragRef.current) return;
+    const rowElement = event.currentTarget.closest<HTMLElement>("[data-rundown-item-id]");
+    const listElement = rundownListRef.current;
+    if (!rowElement || !listElement) return;
+
+    event.preventDefault();
+    event.currentTarget.focus();
+    const rect = rowElement.getBoundingClientRect();
+    pendingDragRef.current = {
+      itemId,
+      pointerId: event.pointerId,
+      pointerType: event.pointerType,
+      startX: event.clientX,
+      startY: event.clientY,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      width: rect.width,
+      height: rect.height,
     };
-    setRundownDropTarget(target.itemId === sourceId ? null : target);
+    listElement.setPointerCapture(event.pointerId);
   };
 
-  const commitRundownDrop = (sourceId = draggedItemIdRef.current) => {
-    const target = dropTargetRef.current;
-    if (!sourceId || !target) return;
-    const newIds = moveRundownItem(rundown, sourceId, target.itemId, target.position);
-    if (newIds) void reorderRundown(newIds);
+  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const pendingDrag = pendingDragRef.current;
+    if (!pendingDrag || pendingDrag.pointerId !== event.pointerId) return;
+    if (event.cancelable) event.preventDefault();
+    lastPointerRef.current = { x: event.clientX, y: event.clientY };
+
+    if (!draggedItemIdRef.current) {
+      const activationDistance = pendingDrag.pointerType === "touch" ? 7 : 4;
+      if (Math.hypot(event.clientX - pendingDrag.startX, event.clientY - pendingDrag.startY) < activationDistance) {
+        return;
+      }
+
+      const initialIndex = rundown.findIndex((item) => item.id === pendingDrag.itemId);
+      const activeDrag = {
+        ...pendingDrag,
+        x: event.clientX - pendingDrag.offsetX,
+        y: event.clientY - pendingDrag.offsetY,
+      };
+      draggedItemIdRef.current = pendingDrag.itemId;
+      dragStateRef.current = activeDrag;
+      setDraggedItemId(pendingDrag.itemId);
+      setDragState(activeDrag);
+      setRundownDropIndex(initialIndex);
+      const item = rundown[initialIndex];
+      if (item) setDragAnnouncement(`${item.title} picked up, position ${initialIndex + 1} of ${rundown.length}`);
+      beginAutoScroll();
+      return;
+    } else {
+      const activeDrag = dragStateRef.current;
+      if (activeDrag) {
+        const nextDrag = {
+          ...activeDrag,
+          x: event.clientX - activeDrag.offsetX,
+          y: event.clientY - activeDrag.offsetY,
+        };
+        dragStateRef.current = nextDrag;
+        setDragState(nextDrag);
+      }
+    }
+
+    updateDropIndex(event.clientX, event.clientY);
+    beginAutoScroll();
   };
 
-  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>, itemId: string) => {
-    if (rundown.length <= 1 || e.button !== 0) return;
-    e.preventDefault();
-    setRundownDropTarget(null);
-    draggedItemIdRef.current = itemId;
-    setDraggedItemId(itemId);
-    // Capture on the stationary list rather than the grip. The preview moves
-    // the dragged row in the DOM, which can make WebKit revoke capture from a
-    // grip inside that row before pointerup is delivered.
-    const listElement = e.currentTarget.closest<HTMLElement>("[data-rundown-list]");
-    listElement?.setPointerCapture(e.pointerId);
-  };
-
-  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!draggedItemIdRef.current) return;
-    if (e.cancelable) e.preventDefault();
-    updateDropTarget(e.clientX, e.clientY);
-  };
-
-  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!draggedItemIdRef.current) return;
-    updateDropTarget(e.clientX, e.clientY);
-    commitRundownDrop();
-    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-      e.currentTarget.releasePointerCapture(e.pointerId);
+  const handlePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    const pendingDrag = pendingDragRef.current;
+    if (!pendingDrag || pendingDrag.pointerId !== event.pointerId) return;
+    if (draggedItemIdRef.current) {
+      updateDropIndex(event.clientX, event.clientY);
+      commitRundownDrop();
     }
     clearRundownDrag();
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
   };
 
   const handleKeyDownReorder = (e: React.KeyboardEvent, currentIndex: number) => {
     if (rundown.length <= 1) return;
+    const currentItem = rundown[currentIndex];
+    if (!currentItem) return;
+    let targetIndex: number | null = null;
     if (e.key === "ArrowUp" && currentIndex > 0) {
       e.preventDefault();
-      const currentItem = rundown[currentIndex];
-      const targetItem = rundown[currentIndex - 1];
-      if (currentItem && targetItem) {
-        const newIds = moveRundownItem(rundown, currentItem.id, targetItem.id, "before");
-        if (newIds) void reorderRundown(newIds);
-      }
+      targetIndex = currentIndex - 1;
     } else if (e.key === "ArrowDown" && currentIndex < rundown.length - 1) {
       e.preventDefault();
-      const currentItem = rundown[currentIndex];
-      const targetItem = rundown[currentIndex + 1];
-      if (currentItem && targetItem) {
-        const newIds = moveRundownItem(rundown, currentItem.id, targetItem.id, "after");
-        if (newIds) void reorderRundown(newIds);
+      targetIndex = currentIndex + 1;
+    } else if (e.key === "Home" && currentIndex > 0) {
+      e.preventDefault();
+      targetIndex = 0;
+    } else if (e.key === "End" && currentIndex < rundown.length - 1) {
+      e.preventDefault();
+      targetIndex = rundown.length - 1;
+    }
+
+    if (targetIndex !== null) {
+      const newIds = moveRundownItemToIndex(rundown, currentItem.id, targetIndex);
+      if (newIds) {
+        void reorderRundown(newIds);
+        markRundownItemDropped(currentItem.id);
+        setDragAnnouncement(`${currentItem.title} moved to position ${targetIndex + 1} of ${rundown.length}`);
       }
     }
   };
+
+  useEffect(() => {
+    const handleWindowKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && draggedItemIdRef.current) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        cancelRundownDragRef.current();
+      }
+    };
+    const handleWindowBlur = () => {
+      if (pendingDragRef.current) cancelRundownDragRef.current();
+    };
+    window.addEventListener("keydown", handleWindowKeyDown, true);
+    window.addEventListener("blur", handleWindowBlur);
+    return () => {
+      window.removeEventListener("keydown", handleWindowKeyDown, true);
+      window.removeEventListener("blur", handleWindowBlur);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (draggedItemId && !rundown.some((item) => item.id === draggedItemId)) {
+      cancelRundownDragRef.current();
+    }
+  }, [draggedItemId, rundown]);
+
+  useEffect(() => {
+    return () => {
+      stopAutoScroll();
+      if (dropAnimationTimeoutRef.current !== null) {
+        window.clearTimeout(dropAnimationTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const openTimePickerFromField = (event: MouseEvent<HTMLDivElement> | TouchEvent<HTMLDivElement>) => {
     if (!(event.target instanceof HTMLInputElement)) return;
@@ -457,100 +629,121 @@ export function Controller() {
          
           </div>
           <div
+            ref={rundownListRef}
             data-rundown-list
-            className="grid max-h-80 min-h-0 flex-1 content-start gap-2 overflow-y-auto p-3 lg:max-h-none"
+            className={`grid max-h-80 min-h-0 flex-1 content-start overflow-y-auto p-3 lg:max-h-none ${
+              draggedItemId ? "gap-0" : "gap-2"
+            }`}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
-            onPointerCancel={clearRundownDrag}
-            onLostPointerCapture={clearRundownDrag}
+            onPointerCancel={cancelRundownDrag}
+            onLostPointerCapture={() => {
+              if (pendingDragRef.current) cancelRundownDrag();
+            }}
           >
             {displayedRundown.map((item, index) => {
               const isActiveItem = item.id === output.activeItemId;
               const activeItemActionDisabled = timerIsRunning && isActiveItem;
-              const isBeingDragged = draggedItemId === item.id;
-              const isDropTarget = dropTarget?.itemId === item.id && !isBeingDragged;
+              const isJustDropped = justDroppedItemId === item.id;
+              const orderIndex = rundown.findIndex((rundownItem) => rundownItem.id === item.id);
+              const gapIsPlaceholder = draggedItemId !== null && visibleDropIndex === index;
+              const gapIsActive = draggedItemId !== null && dropIndex === index;
 
               return (
-                <div
-                  key={item.id}
-                  data-rundown-item-id={item.id}
-                  className={`group relative grid grid-cols-[2rem_6px_1fr_auto] items-center gap-2.5 rounded-md border p-3 transition-all duration-150 ${
-                    isBeingDragged ? "z-10 scale-[1.02] border-primary bg-primary/15 shadow-xl" : ""
-                  } ${
-                    isDropTarget ? "border-primary ring-2 ring-primary/80 bg-primary/15 shadow-sm" : ""
-                  } ${
-                    !isDropTarget && !isBeingDragged && isActiveItem ? "border-primary bg-primary/10" : ""
-                  } ${
-                    !isDropTarget && !isBeingDragged && !isActiveItem ? "border-border bg-background hover:bg-accent" : ""
-                  }`}
-                >
-                  {isDropTarget && (
+                <Fragment key={item.id}>
+                  {draggedItemId && dragState && (
                     <div
-                      className={`pointer-events-none absolute left-0 right-0 z-20 h-1 rounded-full bg-primary shadow-[0_0_8px_hsl(var(--primary))] ${
-                        dropTarget.position === "before" ? "-top-1" : "-bottom-1"
-                      }`}
-                    />
+                      className={`rundown-drop-gap ${gapIsActive ? "rundown-drop-gap--active" : ""}`}
+                      style={{ height: gapIsPlaceholder ? dragState.height : 0 }}
+                      aria-hidden="true"
+                    >
+                      <div className="rundown-drop-line">
+                        <span>Position {index + 1}</span>
+                      </div>
+                    </div>
                   )}
                   <div
-                    role="button"
-                    tabIndex={rundown.length > 1 ? 0 : -1}
-                    aria-label={`Reorder ${item.title}. Drag or press up/down arrow keys to change order.`}
-                    title={rundown.length > 1 ? "Drag to reorder (or use arrow keys)" : undefined}
-                    className={`flex h-full min-h-14 w-8 shrink-0 items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors touch-none select-none ${
-                      rundown.length > 1
-                        ? "cursor-grab hover:border-border hover:bg-accent hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring active:cursor-grabbing"
-                        : "cursor-default opacity-40"
+                    data-rundown-item-id={item.id}
+                    className={`group relative grid grid-cols-[2rem_6px_1fr_auto] items-center gap-2.5 rounded-md border p-3 transition-[border-color,background-color,box-shadow,transform] duration-150 ${
+                      draggedItemId ? "mb-2" : ""
+                    } ${isJustDropped ? "rundown-item--dropped" : ""} ${
+                      isActiveItem ? "border-primary bg-primary/10" : "border-border bg-background hover:bg-accent"
                     }`}
-                    onKeyDown={(e) => handleKeyDownReorder(e, index)}
-                    onPointerDown={(e) => handlePointerDown(e, item.id)}
                   >
-                    <GripVertical className="h-4 w-4" />
-                  </div>
-                  <span className="h-full min-h-14 rounded-full" style={{ backgroundColor: item.color }} />
-                  <div className="min-w-0 text-left">
-                    <span className="block text-sm text-muted-foreground">{String(index + 1).padStart(2, "0")}</span>
-                    <span className="block truncate font-medium">{item.title}</span>
-                    <span className="block truncate text-sm text-muted-foreground">{item.speaker}</span>
-                  </div>
-                  <div className="grid justify-items-end gap-2">
-                    <span className="font-mono text-sm tabular-nums">{Math.round(item.durationMs / 60000)}m</span>
-                    <div className="flex gap-1">
-                      {!isActiveItem && (
+                    <div
+                      role="button"
+                      tabIndex={rundown.length > 1 ? 0 : -1}
+                      aria-label={`Reorder ${item.title}. Use up and down arrow keys, Home, or End to change its position.`}
+                      aria-roledescription="sortable item handle"
+                      aria-keyshortcuts="ArrowUp ArrowDown Home End"
+                      title={rundown.length > 1 ? "Drag to reorder (or use arrow keys)" : undefined}
+                      className={`flex h-full min-h-14 w-8 shrink-0 items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors touch-none select-none ${
+                        rundown.length > 1
+                          ? "cursor-grab hover:border-border hover:bg-accent hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring active:cursor-grabbing"
+                          : "cursor-default opacity-40"
+                      }`}
+                      onKeyDown={(e) => handleKeyDownReorder(e, orderIndex)}
+                      onPointerDown={(e) => handlePointerDown(e, item.id)}
+                    >
+                      <GripVertical className="h-4 w-4" />
+                    </div>
+                    <span className="h-full min-h-14 rounded-full" style={{ backgroundColor: item.color }} />
+                    <div className="min-w-0 text-left">
+                      <span className="block text-sm text-muted-foreground">{String(orderIndex + 1).padStart(2, "0")}</span>
+                      <span className="block truncate font-medium">{item.title}</span>
+                      <span className="block truncate text-sm text-muted-foreground">{item.speaker}</span>
+                    </div>
+                    <div className="grid justify-items-end gap-2">
+                      <span className="font-mono text-sm tabular-nums">{Math.round(item.durationMs / 60000)}m</span>
+                      <div className="flex gap-1">
+                        {!isActiveItem && (
+                          <Button
+                            variant="secondary"
+                            size="icon"
+                            aria-label={`Activate ${item.title}`}
+                            title="Activate timer"
+                            onClick={() => setActivationCandidate(item)}
+                          >
+                            <Check className="h-4 w-4" />
+                          </Button>
+                        )}
                         <Button
                           variant="secondary"
                           size="icon"
-                          aria-label={`Activate ${item.title}`}
-                          title="Activate timer"
-                          onClick={() => setActivationCandidate(item)}
+                          aria-label={`Edit ${item.title}`}
+                          title="Edit item"
+                          disabled={activeItemActionDisabled}
+                          onClick={() => openEditDialog(item)}
                         >
-                          <Check className="h-4 w-4" />
+                          <Pencil className="h-4 w-4" />
                         </Button>
-                      )}
-                      <Button
-                        variant="secondary"
-                        size="icon"
-                        aria-label={`Edit ${item.title}`}
-                        title="Edit item"
-                        disabled={activeItemActionDisabled}
-                        onClick={() => openEditDialog(item)}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        size="icon"
-                        aria-label={`Delete ${item.title}`}
-                        title="Delete item"
-                        disabled={activeItemActionDisabled || rundown.length === 1}
-                        onClick={() => setDeleteCandidate(item)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                        <Button
+                          variant="secondary"
+                          size="icon"
+                          aria-label={`Delete ${item.title}`}
+                          title="Delete item"
+                          disabled={activeItemActionDisabled || rundown.length === 1}
+                          onClick={() => setDeleteCandidate(item)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
                   </div>
-                </div>
+                </Fragment>
               );
             })}
+            {draggedItemId && dragState && (
+              <div
+                className={`rundown-drop-gap ${dropIndex === displayedRundown.length ? "rundown-drop-gap--active" : ""}`}
+                style={{ height: visibleDropIndex === displayedRundown.length ? dragState.height : 0 }}
+                aria-hidden="true"
+              >
+                <div className="rundown-drop-line">
+                  <span>Position {rundown.length}</span>
+                </div>
+              </div>
+            )}
           </div>
         </section>
 
@@ -766,6 +959,37 @@ export function Controller() {
             )}
           </div>
         </section>
+      </div>
+
+      {draggedItem && dragState && (
+        <div
+          className={`rundown-drag-preview grid grid-cols-[2rem_6px_1fr_auto] items-center gap-2.5 rounded-md border p-3 ${
+            dropIndex === null ? "rundown-drag-preview--invalid" : ""
+          }`}
+          style={{
+            width: dragState.width,
+            height: dragState.height,
+            transform: `translate3d(${dragState.x}px, ${dragState.y}px, 0) rotate(0.6deg)`,
+          }}
+          aria-hidden="true"
+        >
+          <div className="flex h-full min-h-14 w-8 items-center justify-center text-primary">
+            <GripVertical className="h-4 w-4" />
+          </div>
+          <span className="h-full min-h-14 rounded-full" style={{ backgroundColor: draggedItem.color }} />
+          <div className="min-w-0">
+            <span className="block text-xs font-medium uppercase tracking-wide text-primary">
+              {dropIndex === null ? "Release to cancel" : `Move to position ${dropIndex + 1}`}
+            </span>
+            <span className="block truncate font-medium">{draggedItem.title}</span>
+            <span className="block truncate text-sm text-muted-foreground">{draggedItem.speaker}</span>
+          </div>
+          <span className="font-mono text-sm tabular-nums">{Math.round(draggedItem.durationMs / 60000)}m</span>
+        </div>
+      )}
+
+      <div className="sr-only" aria-live="assertive" aria-atomic="true">
+        {dragAnnouncement}
       </div>
 
       <footer className="flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-2 border-t border-border px-3 py-3 text-sm text-muted-foreground sm:px-5 lg:h-14 lg:flex-nowrap lg:py-0">
@@ -1080,21 +1304,13 @@ function UrlRow({ label, value, disabled }: { label: string; value: string; disa
   );
 }
 
-function moveRundownItem(
-  rundown: RundownItem[],
-  sourceId: string,
-  targetId: string,
-  position: RundownDropPosition,
-): string[] | null {
-  if (sourceId === targetId) return null;
+function moveRundownItemToIndex(rundown: RundownItem[], sourceId: string, targetIndex: number): string[] | null {
   const sourceIndex = rundown.findIndex((i) => i.id === sourceId);
-  const targetIndex = rundown.findIndex((i) => i.id === targetId);
-  if (sourceIndex === -1 || targetIndex === -1) return null;
+  if (sourceIndex === -1) return null;
 
   const newRundown = [...rundown];
   const [moved] = newRundown.splice(sourceIndex, 1);
-  let insertionIndex = targetIndex + (position === "after" ? 1 : 0);
-  if (sourceIndex < insertionIndex) insertionIndex -= 1;
+  const insertionIndex = Math.max(0, Math.min(targetIndex, newRundown.length));
   newRundown.splice(insertionIndex, 0, moved);
 
   const newIds = newRundown.map((i) => i.id);
