@@ -234,6 +234,10 @@ async fn ws_handler(ws: WebSocketUpgrade, State(context): State<ServerContext>) 
 
 async fn handle_socket(socket: WebSocket, state: AppState) {
     let (mut sender, mut receiver) = socket.split();
+    // Subscribe before taking the snapshot so an update cannot land in the
+    // gap between the initial state read and the live event stream. Events
+    // queued after this point are applied after the snapshot in order.
+    let mut rx = state.subscribe();
     let snapshot = state.snapshot().await;
     let snapshot_event = RealtimeEvent::Snapshot(snapshot);
 
@@ -243,7 +247,6 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         }
     }
 
-    let mut rx = state.subscribe();
     let mut send_task = tokio::spawn(async move {
         while let Ok(event) = rx.recv().await {
             let Ok(payload) = serde_json::to_string(&event) else {

@@ -227,6 +227,8 @@ export const useTempoCueStore = create<StoreState>((set) => ({
   },
 
   reorderRundown: async (itemIds: string[]) => {
+    let previousOrder: string[] | null = null;
+    let optimisticOrderApplied = false;
     set((state) => {
       if (itemIds.length !== state.rundown.length) return {};
       const idMap = new Map(state.rundown.map((item) => [item.id, item]));
@@ -238,8 +240,12 @@ export const useTempoCueStore = create<StoreState>((set) => ({
         seen.add(id);
         reordered.push(item);
       }
+      previousOrder = state.rundown.map((item) => item.id);
+      optimisticOrderApplied = true;
       return { rundown: reordered };
     });
+
+    if (!optimisticOrderApplied) return;
 
     try {
       if (canInvoke) {
@@ -248,6 +254,15 @@ export const useTempoCueStore = create<StoreState>((set) => ({
       return await sendRemoteCommand({ type: "rundown/reorder", payload: { itemIds } });
     } catch (error) {
       console.error("[TempoCue] Failed to reorder rundown:", error);
+      set((state) => {
+        // Do not overwrite a newer server event or a subsequent local reorder.
+        if (!previousOrder || !sameItemOrder(state.rundown, itemIds)) return {};
+        const itemsById = new Map(state.rundown.map((item) => [item.id, item]));
+        return { rundown: previousOrder.flatMap((id) => {
+          const item = itemsById.get(id);
+          return item ? [item] : [];
+        }) };
+      });
     }
   },
 
@@ -466,6 +481,10 @@ function flushPendingCommands(socket: WebSocket) {
   for (const command of commands) {
     socket.send(JSON.stringify(command));
   }
+}
+
+function sameItemOrder(rundown: RundownItem[], itemIds: string[]) {
+  return rundown.length === itemIds.length && rundown.every((item, index) => item.id === itemIds[index]);
 }
 
 function resolveRealtimePort() {

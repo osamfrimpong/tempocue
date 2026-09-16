@@ -637,30 +637,48 @@ impl AppState {
     }
 
     pub async fn reorder_rundown(&self, item_ids: Vec<String>) -> Result<(), String> {
-        let items = {
+        let result = {
             let mut state = self.inner.write().await;
             if item_ids.len() != state.rundown.len() {
-                return Err("Item count mismatch".to_string());
-            }
+                Err("Item count mismatch".to_string())
+            } else {
+                let mut current_items: std::collections::HashMap<String, RundownItem> = state
+                    .rundown
+                    .iter()
+                    .cloned()
+                    .map(|item| (item.id.clone(), item))
+                    .collect();
 
-            let mut current_items: std::collections::HashMap<String, RundownItem> = state
-                .rundown
-                .iter()
-                .cloned()
-                .map(|item| (item.id.clone(), item))
-                .collect();
+                let mut reordered = Vec::with_capacity(item_ids.len());
+                let mut invalid_id = None;
+                for id in &item_ids {
+                    if let Some(item) = current_items.remove(id) {
+                        reordered.push(item);
+                    } else {
+                        invalid_id = Some(id.clone());
+                        break;
+                    }
+                }
 
-            let mut reordered = Vec::with_capacity(item_ids.len());
-            for id in &item_ids {
-                if let Some(item) = current_items.remove(id) {
-                    reordered.push(item);
+                if let Some(id) = invalid_id {
+                    Err(format!("Invalid schedule item id: {id}"))
                 } else {
-                    return Err(format!("Invalid schedule item id: {id}"));
+                    state.rundown = reordered.clone();
+                    Ok(reordered)
                 }
             }
+        };
 
-            state.rundown = reordered.clone();
-            reordered
+        let items = match result {
+            Ok(items) => items,
+            Err(error) => {
+                // A browser may have reordered optimistically from a stale
+                // snapshot. Re-broadcast the authoritative list so every
+                // connected client immediately converges again.
+                let current_items = self.inner.read().await.rundown.clone();
+                self.broadcast(RealtimeEvent::RundownItems(current_items));
+                return Err(error);
+            }
         };
 
         self.broadcast(RealtimeEvent::RundownItems(items));
@@ -1006,6 +1024,7 @@ mod tests {
         assert_eq!(snapshot.rundown.len(), 3);
         let first_id = snapshot.rundown[0].id.clone();
         assert_eq!(snapshot.output.active_item_id, first_id);
+        let mut events = state.subscribe();
 
         // Reorder to: [third, first, second]
         state
@@ -1019,6 +1038,18 @@ mod tests {
         assert_eq!(updated.rundown[2].id, second.id);
         // Active item should remain unchanged
         assert_eq!(updated.output.active_item_id, first_id);
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), events.recv())
+            .await
+            .expect("reordered rundown event timed out")
+            .expect("reordered rundown event was not received");
+        let RealtimeEvent::RundownItems(items) = event else {
+            panic!("expected rundown/items event");
+        };
+        assert_eq!(
+            items.into_iter().map(|item| item.id).collect::<Vec<_>>(),
+            vec![third.id, first_id, second.id]
+        );
     }
 
     #[tokio::test]
@@ -1089,6 +1120,44 @@ mod tests {
                 .map(|item| item.id)
                 .collect::<Vec<_>>(),
             original_ids
+        );
+    }
+
+    #[tokio::test]
+    async fn rejected_reorder_rebroadcasts_authoritative_order() {
+        let state = AppState::default();
+        let added = state
+            .create_item(
+                "Second Item".to_string(),
+                "Speaker 2".to_string(),
+                15 * 60 * 1000,
+                RundownTimingMode::Duration,
+                None,
+                "".to_string(),
+                vec![],
+            )
+            .await;
+        let expected_ids: Vec<String> = state
+            .snapshot()
+            .await
+            .rundown
+            .into_iter()
+            .map(|item| item.id)
+            .collect();
+        let mut events = state.subscribe();
+
+        state.reorder_rundown(vec![added.id]).await.unwrap_err();
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), events.recv())
+            .await
+            .expect("authoritative rundown event timed out")
+            .expect("authoritative rundown event was not received");
+        let RealtimeEvent::RundownItems(items) = event else {
+            panic!("expected rundown/items event");
+        };
+        assert_eq!(
+            items.into_iter().map(|item| item.id).collect::<Vec<_>>(),
+            expected_ids
         );
     }
 }
