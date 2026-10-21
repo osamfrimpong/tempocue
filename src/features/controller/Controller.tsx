@@ -600,7 +600,7 @@ export function Controller() {
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto p-3 lg:grid-cols-[minmax(14rem,18rem)_minmax(0,1fr)_minmax(18rem,22rem)] lg:gap-4 lg:overflow-hidden lg:p-4">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto p-3 lg:grid-cols-[minmax(18rem,25rem)_minmax(0,1fr)_minmax(18rem,22rem)] lg:gap-4 lg:overflow-hidden lg:p-4">
         <section className="flex min-w-0 flex-col rounded-md border border-border bg-card lg:min-h-0 lg:overflow-hidden">
           <div className="border-b border-border p-4">
             <div className="text-sm font-semibold uppercase text-muted-foreground">Rundown</div>
@@ -664,7 +664,7 @@ export function Controller() {
                   )}
                   <div
                     data-rundown-item-id={item.id}
-                    className={`group relative grid grid-cols-[2rem_6px_1fr_auto] items-center gap-2.5 rounded-md border p-3 transition-[border-color,background-color,box-shadow,transform] duration-150 ${
+                    className={`group relative grid grid-cols-[1.75rem_5px_1fr_auto] items-center gap-2 rounded-md border p-3 transition-[border-color,background-color,box-shadow,transform] duration-150 ${
                       draggedItemId ? "mb-2" : ""
                     } ${isJustDropped ? "rundown-item--dropped" : ""} ${
                       isActiveItem ? "border-primary bg-primary/10" : "border-border bg-background hover:bg-accent"
@@ -677,7 +677,7 @@ export function Controller() {
                       aria-roledescription="sortable item handle"
                       aria-keyshortcuts="ArrowUp ArrowDown Home End"
                       title={rundown.length > 1 ? "Drag to reorder (or use arrow keys)" : undefined}
-                      className={`flex h-full min-h-14 w-8 shrink-0 items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors touch-none select-none ${
+                      className={`flex h-full min-h-14 w-7 shrink-0 items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors touch-none select-none self-stretch ${
                         rundown.length > 1
                           ? "cursor-grab hover:border-border hover:bg-accent hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring active:cursor-grabbing"
                           : "cursor-default opacity-40"
@@ -687,11 +687,13 @@ export function Controller() {
                     >
                       <GripVertical className="h-4 w-4" />
                     </div>
-                    <span className="h-full min-h-14 rounded-full" style={{ backgroundColor: item.color }} />
+                    <span className="min-h-14 rounded-full self-stretch" style={{ backgroundColor: item.color }} />
                     <div className="min-w-0 text-left">
                       <span className="block text-sm text-muted-foreground">{String(orderIndex + 1).padStart(2, "0")}</span>
-                      <span className="block truncate font-medium">{item.title}</span>
-                      <span className="block truncate text-sm text-muted-foreground">{item.speaker}</span>
+                      <span className="block font-medium break-words leading-snug">{item.title}</span>
+                      {item.speaker ? (
+                        <span className="block text-sm text-muted-foreground break-words">{item.speaker}</span>
+                      ) : null}
                     </div>
                     <div className="grid justify-items-end gap-2">
                       <span className="font-mono text-sm tabular-nums">{Math.round(item.durationMs / 60000)}m</span>
@@ -963,7 +965,7 @@ export function Controller() {
 
       {draggedItem && dragState && (
         <div
-          className={`rundown-drag-preview grid grid-cols-[2rem_6px_1fr_auto] items-center gap-2.5 rounded-md border p-3 ${
+          className={`rundown-drag-preview grid grid-cols-[1.75rem_5px_1fr_auto] items-center gap-2 rounded-md border p-3 ${
             dropIndex === null ? "rundown-drag-preview--invalid" : ""
           }`}
           style={{
@@ -973,16 +975,18 @@ export function Controller() {
           }}
           aria-hidden="true"
         >
-          <div className="flex h-full min-h-14 w-8 items-center justify-center text-primary">
+          <div className="flex h-full min-h-14 w-7 shrink-0 items-center justify-center text-primary self-stretch">
             <GripVertical className="h-4 w-4" />
           </div>
-          <span className="h-full min-h-14 rounded-full" style={{ backgroundColor: draggedItem.color }} />
+          <span className="min-h-14 rounded-full self-stretch" style={{ backgroundColor: draggedItem.color }} />
           <div className="min-w-0">
             <span className="block text-xs font-medium uppercase tracking-wide text-primary">
               {dropIndex === null ? "Release to cancel" : `Move to position ${dropIndex + 1}`}
             </span>
-            <span className="block truncate font-medium">{draggedItem.title}</span>
-            <span className="block truncate text-sm text-muted-foreground">{draggedItem.speaker}</span>
+            <span className="block font-medium break-words leading-snug">{draggedItem.title}</span>
+            {draggedItem.speaker ? (
+              <span className="block text-sm text-muted-foreground break-words">{draggedItem.speaker}</span>
+            ) : null}
           </div>
           <span className="font-mono text-sm tabular-nums">{Math.round(draggedItem.durationMs / 60000)}m</span>
         </div>
