@@ -6,6 +6,7 @@ import { ObsOverlay } from "../features/obs/ObsOverlay";
 import { LowerThird } from "../features/obs/LowerThird";
 import { Agenda } from "../features/obs/Agenda";
 import { Settings } from "../features/settings/Settings";
+import { FileManager } from "../features/files/FileManager";
 import { useTempoCueStore } from "../stores/useTempoCueStore";
 
 export function App() {
@@ -19,6 +20,7 @@ export function App() {
     <Routes>
       <Route path="/" element={<Navigate to="/control" replace />} />
       <Route path="/control" element={<Controller />} />
+      <Route path="/files" element={<FileManager />} />
       <Route path="/viewer" element={<Viewer />} />
       <Route path="/obs" element={<ObsOverlay />} />
       <Route path="/lower-third" element={<LowerThird />} />

@@ -13,6 +13,7 @@ import {
   EyeOff,
   FileText,
   GripVertical,
+  HardDrive,
   Heart,
   Image,
   Italic,
@@ -67,7 +68,6 @@ export function Controller() {
   const output = useTempoCueStore((state) => state.output);
   const messageDraft = useTempoCueStore((state) => state.messageDraft);
   const urls = useTempoCueStore((state) => state.urls);
-  const connected = useTempoCueStore((state) => state.connected);
   const clockOffsetMs = useTempoCueStore((state) => state.clockOffsetMs);
   const startTimer = useTempoCueStore((state) => state.startTimer);
   const pauseTimer = useTempoCueStore((state) => state.pauseTimer);
@@ -146,7 +146,6 @@ export function Controller() {
   const next = rundown[activeIndex + 1];
   const timerIsRunning = timer.status === "running";
   const isLive = output.live;
-  const outputStatusLabel = !isLive ? "Output inactive" : output.blackout ? "Blackout" : "Output active";
   const controllerTimerLabel = active?.timingMode === "end-time" ? "End at" : "Duration";
   const controllerTimerValue =
     active?.timingMode === "end-time" && active.endTime
@@ -588,8 +587,14 @@ export function Controller() {
               End Live
             </Button>
           )}
-          <Badge variant={connected ? "default" : "outline"}>{connected ? "WebSocket live" : "Local preview"}</Badge>
-          <Badge variant={isLive && output.blackout ? "danger" : isLive ? "default" : "outline"}>{outputStatusLabel}</Badge>
+          <Link
+            to="/files"
+            className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+            title="Open Network File Hub"
+          >
+            <HardDrive className="h-4 w-4 text-primary" />
+            <span className="hidden sm:inline">Files</span>
+          </Link>
           <Link
             to="/settings"
             className="grid h-10 w-10 place-items-center rounded-md hover:bg-accent"
@@ -765,9 +770,17 @@ export function Controller() {
             </div>
             {active?.supportingFiles?.length ? (
               <div className="mt-4 grid gap-2">
-                <div className="flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground">
-                  <Paperclip className="h-4 w-4" />
-                  Supporting files
+                <div className="flex items-center justify-between text-xs font-medium uppercase text-muted-foreground">
+                  <div className="flex items-center gap-2">
+                    <Paperclip className="h-4 w-4" />
+                    <span>Supporting files</span>
+                  </div>
+                  <Link
+                    to="/files"
+                    className="inline-flex items-center gap-1 normal-case text-primary hover:underline font-normal text-xs"
+                  >
+                    <span>File Hub &rarr;</span>
+                  </Link>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {active.supportingFiles.map((file, index) => (

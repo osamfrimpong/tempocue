@@ -177,3 +177,12 @@ textarea {
   background: hsl(var(--border));
   border-radius: 999px;
 }
+
+/* Hide scrollbars for clean mobile carousel/tab scroll */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

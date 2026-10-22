@@ -1,13 +1,17 @@
 mod commands;
 mod server;
 mod state;
+mod storage;
 mod timer;
 
 use commands::{
-    add_time, create_rundown_item, delete_rundown_item, export_schedule_file, get_snapshot, hide_message,
-    import_schedule_file, pause_timer, reorder_rundown, replace_rundown, reset_timer, select_rundown_item, set_blackout,
-    set_hide_timer, set_live, set_timer_color_settings, set_timer_duration, set_timer_end_time,
-    set_timer_remaining, show_message, skip_timer, start_timer, update_message_draft, update_rundown_item,
+    add_time, attach_file_to_rundown, create_rundown_item, create_shared_folder, delete_rundown_item,
+    delete_shared_entry, export_schedule_file, get_shared_files, get_shared_storage_info, get_snapshot,
+    hide_message, import_schedule_file, open_shared_storage_folder, pause_timer, rename_shared_entry,
+    reorder_rundown, replace_rundown, reset_timer, select_rundown_item, set_allow_network_uploads,
+    set_blackout, set_hide_timer, set_live, set_shared_storage_config, set_timer_color_settings,
+    set_timer_duration, set_timer_end_time, set_timer_remaining, show_message, skip_timer, start_timer,
+    update_message_draft, update_rundown_item,
 };
 use server::start_output_server;
 use state::AppState;
@@ -26,8 +30,17 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(state)
         .setup(move |app| {
-            let schedule_path = app.path().app_data_dir()?.join("schedule.json");
+            let app_data = app.path().app_data_dir()?;
+            let schedule_path = app_data.join("schedule.json");
             tauri::async_runtime::block_on(setup_state.initialize_persistence(schedule_path));
+            
+            let storage_path = app_data.join("shared_files");
+            let _ = std::fs::create_dir_all(&storage_path);
+            tauri::async_runtime::block_on(setup_state.set_shared_storage_dir(storage_path));
+
+            let storage_config_path = app_data.join("storage_config.json");
+            tauri::async_runtime::block_on(setup_state.initialize_storage_config(storage_config_path));
+
             if let Some(opened_path) = schedule_path_from_args() {
                 if let Err(error) = tauri::async_runtime::block_on(setup_state.import_schedule_file(&opened_path)) {
                     eprintln!("failed to open {}: {error}", opened_path.display());
@@ -76,7 +89,16 @@ pub fn run() {
             set_timer_color_settings,
             update_message_draft,
             show_message,
-            hide_message
+            hide_message,
+            get_shared_files,
+            create_shared_folder,
+            delete_shared_entry,
+            rename_shared_entry,
+            get_shared_storage_info,
+            set_allow_network_uploads,
+            set_shared_storage_config,
+            open_shared_storage_folder,
+            attach_file_to_rundown
         ])
         .build(tauri::generate_context!())
         .expect("error while building TempoCue");

@@ -10,11 +10,32 @@ const DEFAULT_YELLOW_THRESHOLD_MS: i64 = 5 * 60 * 1000;
 const DEFAULT_RED_THRESHOLD_MS: i64 = 60 * 1000;
 const PORTABLE_SCHEDULE_MAGIC: &[u8] = b"TEMPOCUE\0\x01";
 
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageConfig {
+    pub allow_network_uploads: bool,
+    pub max_upload_size_mb: u64,
+    pub pin: Option<String>,
+}
+
+impl Default for StorageConfig {
+    fn default() -> Self {
+        Self {
+            allow_network_uploads: true,
+            max_upload_size_mb: 1024,
+            pin: None,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     inner: Arc<RwLock<InnerState>>,
     tx: broadcast::Sender<RealtimeEvent>,
     persistence_path: Arc<RwLock<Option<PathBuf>>>,
+    shared_storage_dir: Arc<RwLock<PathBuf>>,
+    storage_config: Arc<RwLock<StorageConfig>>,
+    storage_config_path: Arc<RwLock<Option<PathBuf>>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -132,6 +153,7 @@ pub struct ServerUrls {
     pub obs: String,
     pub lower_third: String,
     pub agenda: String,
+    pub files: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -142,6 +164,7 @@ pub struct UrlSet {
     pub obs: String,
     pub lower_third: String,
     pub agenda: String,
+    pub files: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -172,6 +195,11 @@ pub enum RealtimeEvent {
     Live { enabled: bool },
     #[serde(rename = "settings/timer-colors")]
     TimerColorSettings(TimerColorSettings),
+    #[serde(rename = "files/changed")]
+    FilesChanged {
+        action: String,
+        path: String,
+    },
 }
 
 struct InnerState {
@@ -217,6 +245,9 @@ impl Default for AppState {
             })),
             tx,
             persistence_path: Arc::new(RwLock::new(None)),
+            shared_storage_dir: Arc::new(RwLock::new(PathBuf::from("shared_files"))),
+            storage_config: Arc::new(RwLock::new(StorageConfig::default())),
+            storage_config_path: Arc::new(RwLock::new(None)),
         }
     }
 }
@@ -834,6 +865,123 @@ impl AppState {
             .cloned()
     }
 
+    pub async fn shared_storage_dir(&self) -> PathBuf {
+        self.shared_storage_dir.read().await.clone()
+    }
+
+    pub async fn set_shared_storage_dir(&self, dir: PathBuf) {
+        let mut lock = self.shared_storage_dir.write().await;
+        *lock = dir;
+    }
+
+    pub async fn initialize_storage_config(&self, path: PathBuf) {
+        {
+            let mut lock = self.storage_config_path.write().await;
+            *lock = Some(path.clone());
+        }
+
+        if let Ok(contents) = tokio::fs::read_to_string(&path).await {
+            if let Ok(config) = serde_json::from_str::<StorageConfig>(&contents) {
+                let mut lock = self.storage_config.write().await;
+                *lock = config;
+                return;
+            }
+        }
+        let _ = self.persist_storage_config().await;
+    }
+
+    async fn persist_storage_config(&self) -> Result<(), String> {
+        let (path, config) = {
+            let path_lock = self.storage_config_path.read().await;
+            let config_lock = self.storage_config.read().await;
+            (path_lock.clone(), config_lock.clone())
+        };
+
+        if let Some(path) = path {
+            if let Some(parent) = path.parent() {
+                let _ = tokio::fs::create_dir_all(parent).await;
+            }
+            let payload = serde_json::to_string_pretty(&config)
+                .map_err(|e| format!("Could not serialize storage config: {e}"))?;
+            tokio::fs::write(&path, payload)
+                .await
+                .map_err(|e| format!("Could not write storage config: {e}"))?;
+        }
+        Ok(())
+    }
+
+    pub async fn storage_config(&self) -> StorageConfig {
+        self.storage_config.read().await.clone()
+    }
+
+    pub async fn update_storage_config(
+        &self,
+        allow_network_uploads: bool,
+        max_upload_size_mb: u64,
+        pin: Option<String>,
+    ) {
+        let clean_pin = pin
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty());
+        let clean_max_mb = if max_upload_size_mb == 0 { 1024 } else { max_upload_size_mb };
+
+        {
+            let mut lock = self.storage_config.write().await;
+            lock.allow_network_uploads = allow_network_uploads;
+            lock.max_upload_size_mb = clean_max_mb;
+            lock.pin = clean_pin;
+        }
+        let _ = self.persist_storage_config().await;
+    }
+
+    pub async fn allow_network_uploads(&self) -> bool {
+        self.storage_config.read().await.allow_network_uploads
+    }
+
+    pub async fn set_allow_network_uploads(&self, allowed: bool) {
+        {
+            let mut lock = self.storage_config.write().await;
+            lock.allow_network_uploads = allowed;
+        }
+        let _ = self.persist_storage_config().await;
+    }
+
+    pub async fn max_upload_size_bytes(&self) -> u64 {
+        self.storage_config.read().await.max_upload_size_mb * 1024 * 1024
+    }
+
+    pub async fn max_upload_size_mb(&self) -> u64 {
+        self.storage_config.read().await.max_upload_size_mb
+    }
+
+    pub async fn shared_files_pin(&self) -> Option<String> {
+        self.storage_config.read().await.pin.clone()
+    }
+
+
+    pub fn broadcast_files_changed(&self, action: &str, path: &str) {
+        self.broadcast(RealtimeEvent::FilesChanged {
+            action: action.to_string(),
+            path: path.to_string(),
+        });
+    }
+
+    pub async fn attach_supporting_file(&self, item_id: &str, file_url_or_path: &str) -> Result<(), String> {
+        let items = {
+            let mut state = self.inner.write().await;
+            let Some(item) = state.rundown.iter_mut().find(|item| item.id == item_id) else {
+                return Err(format!("Item not found: {item_id}"));
+            };
+            if !item.supporting_files.iter().any(|f| f == file_url_or_path) {
+                item.supporting_files.push(file_url_or_path.to_string());
+            }
+            state.rundown.clone()
+        };
+        self.broadcast(RealtimeEvent::RundownItems(items));
+        self.persist_schedule().await;
+        Ok(())
+    }
+
     fn broadcast(&self, event: RealtimeEvent) {
         let _ = self.tx.send(event);
     }
@@ -916,6 +1064,7 @@ fn urls_for_host_port(network_host: Option<String>, port: u16) -> ServerUrls {
         obs: advertised.obs,
         lower_third: advertised.lower_third,
         agenda: advertised.agenda,
+        files: advertised.files,
     }
 }
 
@@ -927,6 +1076,7 @@ fn url_set_for_host_port(host: &str, port: u16) -> UrlSet {
         obs: format!("{base}/obs?transparent=true"),
         lower_third: format!("{base}/lower-third"),
         agenda: format!("{base}/agenda"),
+        files: format!("{base}/files"),
     }
 }
 

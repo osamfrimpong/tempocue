@@ -76,6 +76,7 @@ Typical local URLs:
 
 ```text
 http://localhost:4310/control
+http://localhost:4310/files
 http://localhost:4310/viewer
 http://localhost:4310/obs?transparent=true
 http://localhost:4310/lower-third
@@ -83,6 +84,18 @@ http://localhost:4310/agenda
 ```
 
 If the backend can detect a non-loopback local IPv4 address, it binds to all interfaces and advertises URLs using that LAN address. Otherwise it binds to localhost. The active URLs and port are shown in the controller.
+
+## Network File Hub & Management
+
+TempoCue includes a sandboxed network file hub at `/files` for sharing assets over the local network (Wi-Fi or Ethernet) with no internet connection required:
+
+- **Web & Native Access**: Open in any browser on connected laptops, tablets, or phones, or access via the desktop controller.
+- **Folder Trees & Drag-and-Drop**: Supports uploading single files and nested directory trees via drag-and-drop or file pickers.
+- **On-the-fly ZIP Downloads**: Download any directory as a streaming ZIP archive.
+- **Media Previews**: In-app player for audio cues (WAV, MP3, AAC, OGG), videos (MP4, WebM), images, and PDF documents.
+- **Rundown Integration**: One-click "Attach to Cue" adds shared files directly to rundown items as supporting files.
+- **Realtime Sync**: File updates (upload, rename, delete) broadcast over WebSocket to keep all connected screens in sync.
+- **QR Code Sharing**: Instant mobile connection via QR code displayed in the controller and file manager.
 
 ## Keyboard Shortcuts
 
@@ -98,7 +111,7 @@ Shortcuts are ignored while typing in text inputs or textareas.
 
 ## Supporting Files
 
-Rundown items can include supporting file entries, one per line. HTTP and HTTPS entries open directly. Local file paths are served back through the TempoCue output server at `/supporting-file/...` so the controller can open them from the active item.
+Rundown items can include supporting file entries, one per line. HTTP and HTTPS entries open directly. Local file paths are served back through the TempoCue output server at `/supporting-file/...` or `/api/files/raw/...` so the controller can open them from the active item.
 
 ## Not Yet Implemented
 

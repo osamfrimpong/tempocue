@@ -75,6 +75,7 @@ export type UrlSet = {
   obs: string;
   lowerThird: string;
   agenda: string;
+  files: string;
 };
 
 export type ServerUrls = UrlSet & {
@@ -82,6 +83,33 @@ export type ServerUrls = UrlSet & {
   local: UrlSet;
   network: UrlSet | null;
   networkHost: string | null;
+};
+
+export type FileEntry = {
+  name: string;
+  path: string;
+  isDir: boolean;
+  sizeBytes: number;
+  modifiedMs: number | null;
+  mimeType: string | null;
+  extension: string | null;
+};
+
+export type StorageInfo = {
+  totalFiles: number;
+  totalDirs: number;
+  totalSizeBytes: number;
+  storagePath: string;
+  uploadsAllowed: boolean;
+  maxUploadSizeMb: number;
+  pinRequired: boolean;
+  currentPin?: string | null;
+};
+
+export type StorageConfig = {
+  allowNetworkUploads: boolean;
+  maxUploadSizeMb: number;
+  pin: string | null;
 };
 
 export type Snapshot = {
@@ -104,4 +132,5 @@ export type RealtimeEvent =
   | { type: "output/blackout"; payload: { enabled: boolean } }
   | { type: "output/hide-timer"; payload: { enabled: boolean } }
   | { type: "output/live"; payload: { enabled: boolean } }
-  | { type: "settings/timer-colors"; payload: TimerColorSettings };
+  | { type: "settings/timer-colors"; payload: TimerColorSettings }
+  | { type: "files/changed"; payload: { action: string; path: string } };

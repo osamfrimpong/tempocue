@@ -21,6 +21,7 @@ const fallbackLocalUrls = {
   obs: "http://localhost:4310/obs?transparent=true",
   lowerThird: "http://localhost:4310/lower-third",
   agenda: "http://localhost:4310/agenda",
+  files: "http://localhost:4310/files",
 };
 const fallbackUrls: ServerUrls = {
   port: 4310,
@@ -31,6 +32,7 @@ const fallbackUrls: ServerUrls = {
     obs: `http://${fallbackHost}:4310/obs?transparent=true`,
     lowerThird: `http://${fallbackHost}:4310/lower-third`,
     agenda: `http://${fallbackHost}:4310/agenda`,
+    files: `http://${fallbackHost}:4310/files`,
   },
   networkHost: fallbackHost === "localhost" || fallbackHost === "127.0.0.1" ? null : fallbackHost,
   control: `http://${fallbackHost}:4310/control`,
@@ -38,6 +40,7 @@ const fallbackUrls: ServerUrls = {
   obs: `http://${fallbackHost}:4310/obs?transparent=true`,
   lowerThird: `http://${fallbackHost}:4310/lower-third`,
   agenda: `http://${fallbackHost}:4310/agenda`,
+  files: `http://${fallbackHost}:4310/files`,
 };
 
 const fallbackRundown: RundownItem[] = [
@@ -98,6 +101,7 @@ type StoreState = Snapshot & {
   updateMessageDraft: (draft: OutputMessageDraft) => Promise<void>;
   showMessage: (message: OutputMessage) => Promise<void>;
   hideMessage: () => Promise<void>;
+  attachFileToRundown: (itemId: string, fileUrlOrPath: string) => Promise<void>;
 };
 
 const canInvoke = "__TAURI_INTERNALS__" in window;
@@ -151,7 +155,7 @@ type ClientCommand =
   | { type: "message/show"; payload: OutputMessage }
   | { type: "message/hide" };
 
-export const useTempoCueStore = create<StoreState>((set) => ({
+export const useTempoCueStore = create<StoreState>((set, get) => ({
   timer: createIdleTimer(),
   rundown: fallbackRundown,
   output: fallbackOutput,
@@ -397,6 +401,21 @@ export const useTempoCueStore = create<StoreState>((set) => ({
     if (canInvoke) return invoke("hide_message");
     return sendRemoteCommand({ type: "message/hide" });
   },
+
+  attachFileToRundown: async (itemId: string, fileUrlOrPath: string) => {
+    if (canInvoke) {
+      await invoke("attach_file_to_rundown", { itemId, fileUrlOrPath });
+      return;
+    }
+    const state = get();
+    const item = state.rundown.find((i: RundownItem) => i.id === itemId);
+    if (item && !item.supportingFiles.includes(fileUrlOrPath)) {
+      await state.updateRundownItem({
+        ...item,
+        supportingFiles: [...item.supportingFiles, fileUrlOrPath],
+      });
+    }
+  },
 }));
 
 function applySnapshot(snapshot: Snapshot, set: (state: Partial<StoreState>) => void) {
@@ -438,6 +457,9 @@ function applyRealtimeEvent(event: RealtimeEvent, set: (state: Partial<StoreStat
   if (event.type === "output/hide-timer") set((state) => ({ output: { ...state.output, hideTimer: event.payload.enabled } }));
   if (event.type === "output/live") set((state) => ({ output: { ...state.output, live: event.payload.enabled } }));
   if (event.type === "settings/timer-colors") set({ timerColorSettings: normalizeTimerColorSettings(event.payload) });
+  if (event.type === "files/changed") {
+    window.dispatchEvent(new CustomEvent("tempocue:files-changed", { detail: event.payload }));
+  }
 }
 
 function connectWebSocket(
