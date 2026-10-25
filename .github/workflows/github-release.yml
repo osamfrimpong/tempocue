@@ -120,7 +120,7 @@ jobs:
         run: npm ci
 
       - name: Build installer
-        run: npm run tauri build -- --bundles ${{ matrix.bundle }}
+        run: npm run tauri:build -- --bundles ${{ matrix.bundle }}
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
